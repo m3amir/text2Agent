@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "server-sequential-thinking": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@smithery/cli@latest",
+        "run",
+        "@smithery-ai/server-sequential-thinking",
+        "--key",
+        "fd6f7780-545c-4b36-8984-c764d9c9053a"
+      ],
+      "prefix": ".remote.",
+      "description": "Advanced sequential reasoning tools"
+    }
+  }
+} 
