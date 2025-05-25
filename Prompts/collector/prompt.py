@@ -11,3 +11,7 @@ Return a list of the connectors and a short justification for each, explaining w
 Be specific, practical, and exhaustive. Include only the connectors that are clearly necessary or very likely to be useful based on the user input.
 Do not generate implementation code or UI elements — focus solely on connector identification and justification.
 """
+
+feedback_prompt = """
+
+"""
