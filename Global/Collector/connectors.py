@@ -5,6 +5,8 @@ Reads MCP server configuration and provides connector information
 import json
 import os
 import sys
+import glob
+import importlib.util
 from pathlib import Path
 
 # Add project root to path for imports
@@ -36,42 +38,61 @@ def discover_connectors_from_config():
     
     return connectors_dict
 
-def get_static_fallback_connectors():
-    """Fallback static connectors in case config loading fails"""
-    return {
-        "sequential": "Advanced sequential reasoning tools",
-        "atlassian": "Atlassian tools for Jira and Confluence integration",
-        "clickup": "ClickUp project management and task tracking tools",
-        "google": "Google Workspace integration tools",
-        "slack": "Slack team communication platform integration",
-        "microsoft_teams": "Microsoft Teams communication platform integration",
-        "zendesk": "Zendesk customer service platform integration",
-        "intercom": "Intercom customer service platform integration",
-        "salesforce": "Salesforce CRM platform integration",
-        "hubspot": "HubSpot CRM platform integration",
-        "mysql": "MySQL database integration",
-        "mongodb": "MongoDB NoSQL database integration",
-        "notion": "Notion productivity and collaboration tools",
-        "google_calendar": "Google Calendar integration",
-        "google_docs": "Google Docs integration",
-    }
+def get_local_tool_description(connector_name, tool_path):
+    """Get description from local tool.py file"""
+    try:
+        if os.path.exists(tool_path):
+            # Import the tool module
+            spec = importlib.util.spec_from_file_location(f"{connector_name}_tool", tool_path)
+            module = importlib.util.module_from_spec(spec)
+            
+            # Add tool directory to path temporarily
+            tool_dir = os.path.dirname(tool_path)
+            sys.path.insert(0, tool_dir)
+            spec.loader.exec_module(module)
+            sys.path.remove(tool_dir)
+            
+            # Get description variable if it exists
+            if hasattr(module, 'description'):
+                return module.description
+        
+        return f"Available tools for {connector_name}"
+    except Exception as e:
+        print(f"Failed to load description for {connector_name}: {e}")
+        return f"Available tools for {connector_name}"
+
+def discover_local_tools():
+    """Discover local tools from Tools directory"""
+    local_connectors = {}
+    tools_dir = Path(__file__).parent.parent.parent / "Tools"
+    
+    try:
+        for tool_file in glob.glob(os.path.join(tools_dir, "*/tool.py")):
+            connector_name = os.path.basename(os.path.dirname(tool_file)).lower()
+            description = get_local_tool_description(connector_name, tool_file)
+            local_connectors[connector_name] = description
+            
+        return local_connectors
+    except Exception as e:
+        print(f"Failed to discover local tools: {e}")
+        return {}
 
 def load_connectors():
-    """Load connectors from MCP configuration"""
+    """Load connectors from MCP configuration and local tools"""
     try:
-        # Try to load from MCP config
-        connectors_dict = discover_connectors_from_config()
+        # Load remote MCP connectors from config
+        remote_connectors = discover_connectors_from_config()
         
-        # If no connectors discovered, use fallback
-        if not connectors_dict:
-            print("No MCP connectors found in config, using static fallback")
-            connectors_dict = get_static_fallback_connectors()
-             
-        return connectors_dict
+        # Load local tools from Tools directory
+        local_connectors = discover_local_tools()
+        
+        # Combine both (local tools take precedence for descriptions)
+        all_connectors = {**remote_connectors, **local_connectors}
+        
+        return all_connectors
     except Exception as e:
         print(f"Failed to discover connectors: {e}")
-        print("Using static fallback connectors")
-        return get_static_fallback_connectors()
+        return {}
 
 def get_connectors():
     """Get the discovered connectors dictionary"""

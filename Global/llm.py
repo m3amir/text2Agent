@@ -40,7 +40,9 @@ class LLM:
         
         for attempt in range(max_retries + 1):
             model = self.model.bind_tools([format])
+            print(input)
             unparsed = model.invoke(input)
+            print(unparsed)
             
             # Check if content is empty and we have tool calls (successful tool use)
             if unparsed.content == "" and unparsed.tool_calls:
