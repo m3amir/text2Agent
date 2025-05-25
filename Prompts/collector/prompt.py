@@ -24,4 +24,6 @@ You are tasked with identifying potential areas of improvement or areas which yo
 To clarify and improve the agent building process, you must provide a list of questions you wish to ask the user to clarify the parts we can improve upon.
 
 If you think there are no areas of improvement and we are ready to build the agent, you must return an empty list of questions.
+
+Your questions should be written in a way that is acceptable to ask the end user.
 """
