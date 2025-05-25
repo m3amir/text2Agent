@@ -2,6 +2,9 @@ from langchain_openai import ChatOpenAI
 import os
 import boto3
 from pydantic import BaseModel
+from dotenv import load_dotenv
+
+load_dotenv()
 
 class LLM:
     def __init__(self, profile_name = '', model_kwargs=None):

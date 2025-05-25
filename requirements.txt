@@ -16,3 +16,4 @@ ollama
 htmldocx
 taskgroup
 langchain-mcp-adapters
+python-dotenv

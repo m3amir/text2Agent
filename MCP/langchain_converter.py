@@ -11,10 +11,13 @@ try:
 except ImportError:
     LANGCHAIN_AVAILABLE = False
 
-async def convert_mcp_to_langchain(server_command="python", server_args=["tool_mcp_server.py"]):
+async def convert_mcp_to_langchain(server_command=None, server_args=None):
     """Convert MCP tools to LangChain format"""
     
     if not LANGCHAIN_AVAILABLE:
+        return []
+    
+    if not server_command or not server_args:
         return []
     
     server_params = StdioServerParameters(command=server_command, args=server_args)
@@ -27,12 +30,12 @@ async def convert_mcp_to_langchain(server_command="python", server_args=["tool_m
     except Exception:
         return []
 
-async def main():
-    """Convert and return LangChain tools"""
-    tools = await convert_mcp_to_langchain()
-    print(f"Converted {len(tools)} tools")
-    print(tools)
-    return tools
+# async def main():
+#     """Convert and return LangChain tools"""
+#     tools = await convert_mcp_to_langchain()
+#     print(f"Converted {len(tools)} tools")
+#     print(tools)
+#     return tools
 
-if __name__ == "__main__":
-    asyncio.run(main()) 
+# if __name__ == "__main__":
+#     asyncio.run(main()) 

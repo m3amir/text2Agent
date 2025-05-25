@@ -10,8 +10,60 @@
         "--key",
         "fd6f7780-545c-4b36-8984-c764d9c9053a"
       ],
-      "prefix": ".remote.",
+      "prefix": "sequential",
       "description": "Advanced sequential reasoning tools"
+    },
+    "mcp-atlassian": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e", "CONFLUENCE_URL",
+        "-e", "CONFLUENCE_USERNAME",
+        "-e", "CONFLUENCE_API_TOKEN",
+        "-e", "JIRA_URL",
+        "-e", "JIRA_USERNAME",
+        "-e", "JIRA_API_TOKEN",
+        "ghcr.io/sooperset/mcp-atlassian:latest"
+      ],
+      "prefix": "atlassian",
+      "description": "MCP server for Atlassian tools (Confluence, Jira)",
+      "env": {
+        "CONFLUENCE_URL": "https://your-company.atlassian.net/wiki",
+        "CONFLUENCE_USERNAME": "your.email@company.com",
+        "CONFLUENCE_API_TOKEN": "your_confluence_api_token",
+        "JIRA_URL": "https://your-company.atlassian.net",
+        "JIRA_USERNAME": "your.email@company.com",
+        "JIRA_API_TOKEN": "your_jira_api_token"
+      }
+    }
+  },
+  "_disabled_servers": {
+    "google-workspace": {
+      "command": "node",
+      "args": ["/path/to/google-workspace-server/build/index.js"],
+      "prefix": "google",
+      "description": "Google Workspace integration tools - DISABLED due to invalid path",
+      "env": {
+        "GOOGLE_CLIENT_ID": "your_client_id",
+        "GOOGLE_CLIENT_SECRET": "your_client_secret",
+        "GOOGLE_REFRESH_TOKEN": "your_refresh_token"
+      }
+    },
+    "ClickUp": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@taazkareem/clickup-mcp-server@latest"
+      ],
+      "prefix": "clickup",
+      "description": "MCP server for ClickUp tools - DISABLED until credentials are configured",
+      "env": {
+        "CLICKUP_API_KEY": "your-api-key",
+        "CLICKUP_TEAM_ID": "your-team-id",
+        "DOCUMENT_SUPPORT": "true"
+      }
     }
   }
 } 

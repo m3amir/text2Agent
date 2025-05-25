@@ -1,21 +1,36 @@
-from Global.llm import LLM
-from Prompts.collector.prompt import template
-from pydantic import BaseModel, Field
-from Global.Collector.connectors import connectors
+import sys
+import os
+import asyncio
 
-user = "I want an agent that takes emails from the emailtork file in our sharepoint and sends cold emails to the people in the file about a new product we are launching."
+# Add the project root to Python path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
-def router():
-    class connectorResponse(BaseModel):
-        """Always use this tool to structure your response to the user."""
-        connectors: list = Field(description="The formatted list of connectors")
-    required_connectors = {}
-    llm = LLM()
-    prompt = template + "\n\n" + "\n".join([f"{connector}: {connectors[connector]}" for connector in connectors])
-    prompt += "\n\n" + "User Agent Description: " + user
-    response = llm.formatted(prompt, connectorResponse)
-    for connector in response.connectors:
-        required_connectors[connector['name']] = connector['justification']
-    return required_connectors
+from MCP.langchain_converter import convert_mcp_to_langchain
 
-print(router())
+async def router():
+    """Connect to the universal MCP server and get all tools"""
+    print("Connecting to universal MCP server...")
+    
+    # Connect to the universal tool server
+    tools = await convert_mcp_to_langchain(
+        server_command="python3",
+        server_args=[os.path.join(os.path.dirname(__file__), "..", "..", "MCP", "tool_mcp_server.py")]
+    )
+    
+    print(f"Total tools from universal server: {len(tools)}")
+    print("-" * 60)
+    
+    # Print each tool on a new line
+    for tool in tools:
+        name = tool.name
+        description = getattr(tool, 'description', 'No description')
+        print(f"Tool: {name}")
+        print(f"Description: {description}")
+        print("-" * 60)
+    
+    # Return simplified tool info
+    return [{"name": tool.name, "description": getattr(tool, 'description', 'No description')} 
+            for tool in tools]
+
+if __name__ == "__main__":
+    result = asyncio.run(router())
