@@ -17,3 +17,4 @@ htmldocx
 taskgroup
 langchain-mcp-adapters
 python-dotenv
+flask
