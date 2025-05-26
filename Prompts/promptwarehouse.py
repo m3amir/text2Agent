@@ -127,5 +127,5 @@ results = warehouse.sync_prompts_from_files()
 print(warehouse.list_prompts())
 
 # # Example: Get a specific prompt
-# prompt = warehouse.get_prompt('collector_collector')
-# print(prompt)
+prompt = warehouse.get_prompt('collector')
+print(prompt)
