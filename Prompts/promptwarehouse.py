@@ -1,15 +1,14 @@
 import boto3
-import sys
 import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from Prompts.master_prompts import *
+import importlib.util
+import re
 
 class PromptWarehouse:
     def __init__(self, profile_name):
         self.session = boto3.Session(profile_name=profile_name, region_name='eu-west-2')
         self.client = self.session.client("bedrock-agent", region_name='eu-west-2')
 
-    def create_prompt(self, name: str, description: str, prompt: str, input_vars: list=[]):
+    def create_prompt(self, name: str, description: str, prompt: str):
         response = self.client.create_prompt(
             name=name,
             description=description,
@@ -18,71 +17,115 @@ class PromptWarehouse:
                 "name": name,
                 "templateConfiguration": {
                     "text": {
-                        "inputVariables": [{"name": var} for var in input_vars],
+                        "inputVariables": [],
                         "text": prompt,
                     }
                 },
                 "templateType": "TEXT",
             }]
         )
-        version = self.client.create_prompt_version(promptIdentifier=response['id'])
-        return version
+        self.client.create_prompt_version(promptIdentifier=response['id'])
+        return response['id']
+
+    def sync_prompts_from_files(self):
+        """Sync prompts from all prompt.py files in subdirectories"""
+        prompts_dir = os.path.dirname(__file__)
+        
+        for root, dirs, files in os.walk(prompts_dir):
+            if root == prompts_dir or 'prompt.py' not in files:
+                continue
+                
+            try:
+                # Load the prompt.py file
+                spec = importlib.util.spec_from_file_location("prompt_module", os.path.join(root, 'prompt.py'))
+                prompt_module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(prompt_module)
+                
+                subdir_name = os.path.basename(root)
+                existing_prompts = self._get_existing_prompts()
+                
+                # Find all variables ending with '_prompt'
+                for attr_name in dir(prompt_module):
+                    if attr_name.endswith('_prompt') and not attr_name.startswith('_'):
+                        prompt_content = getattr(prompt_module, attr_name)
+                        
+                        if isinstance(prompt_content, str):
+                            prompt_name = attr_name[:-7]  # Just the variable name without "_prompt"
+                            
+                            if prompt_name not in existing_prompts:
+                                self.create_prompt(prompt_name, f"Prompt from {subdir_name}/{attr_name}", prompt_content)
+                                print(f"✓ Created: {prompt_name}")
+                            else:
+                                print(f"- Exists: {prompt_name}")
+                                
+            except Exception as e:
+                print(f"✗ Error in {root}: {e}")
 
     def list_prompts(self):
+        """List all prompts in a nice format"""
         response = self.client.list_prompts(maxResults=100)
-        prompts_dict = {}
-        for prompt in response["promptSummaries"]:
-            prompts_dict[prompt['name']] = {
-                'id': prompt['id'],
-                'description': prompt['description'],
-                'last_updated': prompt['updatedAt'].strftime('%Y-%m-%d %H:%M:%S'),
-                'arn': prompt['arn']
-            }
-        return prompts_dict
-    
-    def get_prompt_versions(self, prompt_id: str):
-        response = self.client.list_prompts(promptIdentifier=prompt_id)
+        prompts = response.get("promptSummaries", [])
         
-        # Check if 'promptSummaries' exists in the response and is a list
-        if 'promptSummaries' in response and isinstance(response['promptSummaries'], list):
-            versions_dict = {}
+        if not prompts:
+            return "No prompts found."
+        
+        output = ["=" * 60, f"PROMPT WAREHOUSE ({len(prompts)} prompts)", "=" * 60]
+        
+        for prompt in prompts:
+            # Get latest version
+            try:
+                versions_response = self.client.list_prompts(promptIdentifier=prompt['id'])
+                versions = [p['version'] for p in versions_response.get('promptSummaries', []) if 'version' in p]
+                latest_version = max([int(v) for v in versions if v.isdigit()]) if versions else 1
+            except Exception as e:
+                latest_version = "N/A"
             
-            # Iterate through the list of prompt summaries and clean up the data
-            for prompt in response['promptSummaries']:
-                version = prompt.get('version')
-                if version:
-                    # Store version info (arn, createdAt, etc.) in a dictionary
-                    versions_dict[version] = {
-                        'arn': prompt.get('arn'),
-                        'createdAt': prompt.get('createdAt'),
-                        'updatedAt': prompt.get('updatedAt'),
-                        'description': prompt.get('description'),
-                        'id': prompt.get('id'),
-                        'name': prompt.get('name')
-                    }
-            return versions_dict
-        else:
-            print("No prompt versions found.")
-            return {}
-
-    def get_prompt(self, prompt_id: str):
-        prompt_id = self.get_prompt_id('colleagueJudgeSystem')
-        prompts = self.get_prompt_versions(prompt_id)
+            output.append(f"📝 {prompt['name']}")
+            output.append(f"   {prompt['description']}")
+            output.append(f"   Updated: {prompt['updatedAt'].strftime('%Y-%m-%d %H:%M')}")
+            output.append(f"   Version: {latest_version}")
+            output.append("-" * 60)
         
-        # Filter out non-numeric keys and convert valid ones to integers
-        numeric_keys = [key for key in prompts.keys() if key.isdigit()]
-        
-        if numeric_keys:  # Check if we have valid numeric keys
-            latest_version = max(map(int, numeric_keys))
-            prompt = self.client.get_prompt(promptIdentifier=prompt_id, promptVersion=str(latest_version))
-            return prompt['variants'][0]['templateConfiguration']['text']['text']
-        else:
-            print("No numeric versions found.")
+        return "\n".join(output)
 
-    def get_prompt_id(self, prompt_name):
-        response = self.client.list_prompts(
-            maxResults=100)
-        for prompt in response["promptSummaries"]:
-            if prompt["name"] == prompt_name:
-                return prompt["id"]
-        return None
+    def get_prompt(self, prompt_name):
+        """Get the latest version of a prompt by name"""
+        try:
+            # Find the prompt ID
+            response = self.client.list_prompts(maxResults=100)
+            prompt_id = None
+            for prompt in response.get("promptSummaries", []):
+                if prompt['name'] == prompt_name:
+                    prompt_id = prompt['id']
+                    break
+            
+            if not prompt_id:
+                return None
+            
+            # Get versions and find latest
+            versions_response = self.client.list_prompts(promptIdentifier=prompt_id)
+            versions = [p['version'] for p in versions_response.get('promptSummaries', []) if 'version' in p]
+            latest_version = max([int(v) for v in versions if v.isdigit()]) if versions else "1"
+            
+            # Get the prompt content
+            prompt_response = self.client.get_prompt(promptIdentifier=prompt_id, promptVersion=str(latest_version))
+            return prompt_response['variants'][0]['templateConfiguration']['text']['text']
+            
+        except Exception as e:
+            print(f"Error getting prompt {prompt_name}: {e}")
+            return None
+
+    def _get_existing_prompts(self):
+        """Get list of existing prompt names"""
+        response = self.client.list_prompts(maxResults=100)
+        return {prompt['name'] for prompt in response.get("promptSummaries", [])}
+
+
+# Run sync
+warehouse = PromptWarehouse('m3')
+results = warehouse.sync_prompts_from_files()
+print(warehouse.list_prompts())
+
+# # Example: Get a specific prompt
+# prompt = warehouse.get_prompt('collector_collector')
+# print(prompt)
