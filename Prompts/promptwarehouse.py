@@ -121,11 +121,11 @@ class PromptWarehouse:
         return {prompt['name'] for prompt in response.get("promptSummaries", [])}
 
 
-# Run sync
-warehouse = PromptWarehouse('m3')
-results = warehouse.sync_prompts_from_files()
-print(warehouse.list_prompts())
+# # Run sync
+# warehouse = PromptWarehouse('m3')
+# results = warehouse.sync_prompts_from_files()
+# print(warehouse.list_prompts())
 
-# # Example: Get a specific prompt
-prompt = warehouse.get_prompt('collector')
-print(prompt)
+# # # Example: Get a specific prompt
+# prompt = warehouse.get_prompt('collector')
+# print(prompt)

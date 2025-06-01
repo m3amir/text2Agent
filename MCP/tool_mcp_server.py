@@ -139,7 +139,17 @@ class SimpleMCPServer:
     async def _load_remote_server(self, server_name, config):
         """Load tools from a remote server"""
         try:
-            params = StdioServerParameters(command=config["command"], args=config.get("args", []))
+            # Prepare environment variables
+            env_vars = config.get("env", {})
+            current_env = os.environ.copy()
+            if env_vars:
+                current_env.update({k: str(v) for k, v in env_vars.items()})
+            
+            params = StdioServerParameters(
+                command=config["command"], 
+                args=config.get("args", []),
+                env=current_env
+            )
             
             async with stdio_client(params) as (read, write):
                 async with ClientSession(read, write) as session:
@@ -166,7 +176,17 @@ class SimpleMCPServer:
     async def _call_remote(self, config, original_name, arguments):
         """Call a remote tool"""
         try:
-            params = StdioServerParameters(command=config["command"], args=config.get("args", []))
+            # Prepare environment variables
+            env_vars = config.get("env", {})
+            current_env = os.environ.copy()
+            if env_vars:
+                current_env.update({k: str(v) for k, v in env_vars.items()})
+            
+            params = StdioServerParameters(
+                command=config["command"], 
+                args=config.get("args", []),
+                env=current_env
+            )
             
             async with stdio_client(params) as (read, write):
                 async with ClientSession(read, write) as session:

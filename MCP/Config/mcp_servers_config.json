@@ -13,6 +13,20 @@
       "prefix": "sequential",
       "description": "Advanced sequential reasoning tools"
     },
+    "ms365": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@softeria/ms-365-mcp-server"
+      ]
+    },
+    "mcp-server-chart": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@antv/mcp-server-chart"
+      ]
+    },
     "mcp-atlassian": {
       "command": "docker",
       "args": [
