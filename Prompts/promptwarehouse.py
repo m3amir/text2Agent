@@ -1,7 +1,6 @@
 import boto3
 import os
 import importlib.util
-import re
 
 class PromptWarehouse:
     def __init__(self, profile_name):

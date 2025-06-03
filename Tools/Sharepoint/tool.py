@@ -5,7 +5,17 @@ Provides folder listing and file search functionality
 import requests
 import json
 import asyncio
+import io
 from typing import Optional, Dict, List, Any
+
+# Text extraction libraries
+try:
+    import docx2txt
+    from PyPDF2 import PdfReader
+    import openpyxl
+    EXTRACTION_AVAILABLE = True
+except ImportError:
+    EXTRACTION_AVAILABLE = False
 
 class SharepointToolkit:
     """SharePoint toolkit using Microsoft Graph API"""
@@ -380,4 +390,339 @@ class SharepointToolkit:
         except Exception as e:
             return json.dumps({
                 'error': f"Exception in get_file_content: {str(e)}"
+            })
+    
+    def sharepoint_get_document_by_name(self, document_name: str, drive_name: str = "Documents", exact_match: bool = True) -> str:
+        """
+        Get a document by its name
+        
+        Args:
+            document_name: Name of the document to search for
+            drive_name: Name of the drive/library (default: Documents)
+            exact_match: If True, search for exact name match; if False, search for partial match
+        
+        Returns:
+            JSON string with document information
+        """
+        return asyncio.run(self._get_document_by_name_async(document_name, drive_name, exact_match))
+    
+    async def _get_document_by_name_async(self, document_name: str, drive_name: str = "Documents", exact_match: bool = True) -> str:
+        """Async implementation of get document by name"""
+        try:
+            # Use the existing search functionality
+            search_result = await self._search_files_async(document_name, drive_name)
+            search_data = json.loads(search_result)
+            
+            if not search_data.get('success'):
+                return search_result
+            
+            files = search_data.get('files', [])
+            
+            if exact_match:
+                # Filter for exact name match
+                exact_matches = [f for f in files if f.get('name', '').lower() == document_name.lower()]
+                
+                if len(exact_matches) == 1:
+                    return json.dumps({
+                        'success': True,
+                        'document_name': document_name,
+                        'exact_match': True,
+                        'file': exact_matches[0]
+                    }, indent=2)
+                elif len(exact_matches) > 1:
+                    return json.dumps({
+                        'success': True,
+                        'document_name': document_name,
+                        'exact_match': True,
+                        'multiple_matches': True,
+                        'files': exact_matches,
+                        'count': len(exact_matches)
+                    }, indent=2)
+                else:
+                    return json.dumps({
+                        'success': True,
+                        'document_name': document_name,
+                        'exact_match': True,
+                        'found': False,
+                        'message': f"No exact match found for '{document_name}'",
+                        'suggestion': f"Try using exact_match=False for partial matching"
+                    }, indent=2)
+            else:
+                # Return all partial matches
+                return json.dumps({
+                    'success': True,
+                    'document_name': document_name,
+                    'exact_match': False,
+                    'files': files,
+                    'count': len(files)
+                }, indent=2)
+                
+        except Exception as e:
+            return json.dumps({
+                'error': f"Exception in get_document_by_name: {str(e)}"
+            })
+    
+    def sharepoint_get_document_by_name_and_type(self, document_name: str, file_type: str, drive_name: str = "Documents") -> str:
+        """
+        Get a document by its name and file type
+        
+        Args:
+            document_name: Name pattern of the document to search for
+            file_type: File extension (e.g., 'pdf', 'docx')
+            drive_name: Name of the drive/library (default: Documents)
+        
+        Returns:
+            JSON string with document information
+        """
+        return asyncio.run(self._get_document_by_name_and_type_async(document_name, file_type, drive_name))
+    
+    async def _get_document_by_name_and_type_async(self, document_name: str, file_type: str, drive_name: str = "Documents") -> str:
+        """Async implementation of get document by name and type"""
+        try:
+            # Use the existing search functionality with file type filter
+            search_result = await self._search_files_async(document_name, drive_name, file_type)
+            search_data = json.loads(search_result)
+            
+            if not search_data.get('success'):
+                return search_result
+            
+            files = search_data.get('files', [])
+            
+            # Look for exact name matches within the filtered results
+            exact_matches = []
+            partial_matches = []
+            
+            for file in files:
+                file_name = file.get('name', '')
+                if file_name.lower() == f"{document_name.lower()}.{file_type.lower()}":
+                    exact_matches.append(file)
+                else:
+                    partial_matches.append(file)
+            
+            result = {
+                'success': True,
+                'document_name': document_name,
+                'file_type': file_type,
+                'drive': drive_name
+            }
+            
+            if exact_matches:
+                if len(exact_matches) == 1:
+                    result['exact_match_found'] = True
+                    result['file'] = exact_matches[0]
+                else:
+                    result['multiple_exact_matches'] = True
+                    result['exact_matches'] = exact_matches
+                    result['exact_count'] = len(exact_matches)
+            
+            if partial_matches:
+                result['partial_matches'] = partial_matches
+                result['partial_count'] = len(partial_matches)
+            
+            if not exact_matches and not partial_matches:
+                result['found'] = False
+                result['message'] = f"No documents found matching '{document_name}' with type '{file_type}'"
+            
+            return json.dumps(result, indent=2)
+                
+        except Exception as e:
+            return json.dumps({
+                'error': f"Exception in get_document_by_name_and_type: {str(e)}"
+            })
+    
+    def sharepoint_download_and_extract_text(self, file_id: str, drive_name: str = "Documents") -> str:
+        """
+        Download a document and extract its text content
+        
+        Args:
+            file_id: ID of the file to download and extract text from
+            drive_name: Name of the drive/library (default: Documents)
+        
+        Returns:
+            JSON string with extracted text content
+        """
+        return asyncio.run(self._download_and_extract_text_async(file_id, drive_name))
+    
+    async def _download_and_extract_text_async(self, file_id: str, drive_name: str = "Documents") -> str:
+        """Async implementation of download and extract text"""
+        try:
+            if not EXTRACTION_AVAILABLE:
+                return json.dumps({
+                    'error': 'Text extraction libraries not available',
+                    'message': 'Install required packages: pip install python-docx PyPDF2 openpyxl docx2txt',
+                    'success': False
+                })
+            
+            # First get file metadata
+            file_info_result = await self._get_file_content_async(file_id, drive_name)
+            file_info_data = json.loads(file_info_result)
+            
+            if not file_info_data.get('success'):
+                return file_info_result
+            
+            file_info = file_info_data['file']
+            download_url = file_info.get('downloadUrl')
+            
+            if not download_url:
+                return json.dumps({
+                    'error': 'No download URL available for this file',
+                    'success': False
+                })
+            
+            # Download the file
+            headers = {
+                'Authorization': f'Bearer {self.access_token}'
+            }
+            
+            response = requests.get(download_url, headers=headers)
+            
+            if response.status_code != 200:
+                return json.dumps({
+                    'error': f"Failed to download file: {response.status_code}",
+                    'details': response.text,
+                    'success': False
+                })
+            
+            # Extract text based on file type
+            file_name = file_info.get('name', '').lower()
+            mime_type = file_info.get('mimeType', '')
+            
+            extracted_text = ""
+            extraction_method = ""
+            
+            try:
+                if file_name.endswith('.docx') or 'wordprocessingml' in mime_type:
+                    # Extract from Word document
+                    file_stream = io.BytesIO(response.content)
+                    extracted_text = docx2txt.process(file_stream)
+                    extraction_method = "docx2txt"
+                    
+                elif file_name.endswith('.pdf') or mime_type == 'application/pdf':
+                    # Extract from PDF
+                    file_stream = io.BytesIO(response.content)
+                    pdf_reader = PdfReader(file_stream)
+                    extracted_text = ""
+                    for page_num, page in enumerate(pdf_reader.pages):
+                        extracted_text += f"\n--- Page {page_num + 1} ---\n"
+                        extracted_text += page.extract_text()
+                    extraction_method = "PyPDF2"
+                    
+                elif file_name.endswith(('.xlsx', '.xls')) or 'spreadsheetml' in mime_type:
+                    # Extract from Excel
+                    file_stream = io.BytesIO(response.content)
+                    workbook = openpyxl.load_workbook(file_stream, data_only=True)
+                    extracted_text = ""
+                    
+                    for sheet_name in workbook.sheetnames:
+                        sheet = workbook[sheet_name]
+                        extracted_text += f"\n--- Sheet: {sheet_name} ---\n"
+                        
+                        for row in sheet.iter_rows(values_only=True):
+                            row_text = []
+                            for cell in row:
+                                if cell is not None:
+                                    row_text.append(str(cell))
+                            if row_text:
+                                extracted_text += " | ".join(row_text) + "\n"
+                    
+                    extraction_method = "openpyxl"
+                    
+                elif file_name.endswith('.txt') or mime_type == 'text/plain':
+                    # Extract from text file
+                    extracted_text = response.content.decode('utf-8')
+                    extraction_method = "plain text"
+                    
+                else:
+                    return json.dumps({
+                        'error': f"Unsupported file type for text extraction: {file_name}",
+                        'supported_types': ['.docx', '.pdf', '.xlsx', '.xls', '.txt'],
+                        'file_mime_type': mime_type,
+                        'success': False
+                    })
+                
+                # Clean up the extracted text
+                extracted_text = extracted_text.strip()
+                
+                return json.dumps({
+                    'success': True,
+                    'file_info': {
+                        'name': file_info.get('name'),
+                        'size': file_info.get('size'),
+                        'mime_type': mime_type,
+                        'id': file_id
+                    },
+                    'extraction': {
+                        'method': extraction_method,
+                        'text_length': len(extracted_text),
+                        'text': extracted_text
+                    },
+                    'preview': extracted_text[:500] + "..." if len(extracted_text) > 500 else extracted_text
+                }, indent=2)
+                
+            except Exception as extraction_error:
+                return json.dumps({
+                    'error': f"Text extraction failed: {str(extraction_error)}",
+                    'extraction_method': extraction_method,
+                    'file_type': file_name,
+                    'success': False
+                })
+                
+        except Exception as e:
+            return json.dumps({
+                'error': f"Exception in download_and_extract_text: {str(e)}",
+                'success': False
+            })
+    
+    def sharepoint_extract_text_by_name(self, document_name: str, drive_name: str = "Documents", exact_match: bool = True) -> str:
+        """
+        Find a document by name and extract its text content
+        
+        Args:
+            document_name: Name of the document to find and extract text from
+            drive_name: Name of the drive/library (default: Documents)
+            exact_match: If True, search for exact name match; if False, search for partial match
+        
+        Returns:
+            JSON string with extracted text content
+        """
+        return asyncio.run(self._extract_text_by_name_async(document_name, drive_name, exact_match))
+    
+    async def _extract_text_by_name_async(self, document_name: str, drive_name: str = "Documents", exact_match: bool = True) -> str:
+        """Async implementation of extract text by name"""
+        try:
+            # First find the document
+            search_result = await self._get_document_by_name_async(document_name, drive_name, exact_match)
+            search_data = json.loads(search_result)
+            
+            if not search_data.get('success'):
+                return search_result
+            
+            # Check if we found exactly one file
+            if 'file' in search_data:
+                # Single file found
+                file_id = search_data['file']['id']
+                return await self._download_and_extract_text_async(file_id, drive_name)
+            elif 'files' in search_data and len(search_data['files']) == 1:
+                # Single file from multiple results
+                file_id = search_data['files'][0]['id']
+                return await self._download_and_extract_text_async(file_id, drive_name)
+            elif 'files' in search_data and len(search_data['files']) > 1:
+                # Multiple files found
+                return json.dumps({
+                    'error': 'Multiple files found. Please be more specific or use exact file ID.',
+                    'found_files': [{'name': f['name'], 'id': f['id']} for f in search_data['files']],
+                    'suggestion': 'Use sharepoint_download_and_extract_text() with a specific file ID',
+                    'success': False
+                })
+            else:
+                # No files found
+                return json.dumps({
+                    'error': f"No document found with name: {document_name}",
+                    'success': False
+                })
+                
+        except Exception as e:
+            return json.dumps({
+                'error': f"Exception in extract_text_by_name: {str(e)}",
+                'success': False
             }) 

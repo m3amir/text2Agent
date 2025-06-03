@@ -19,5 +19,4 @@ langchain-mcp-adapters
 python-dotenv
 flask
 langchain_aws
-mcp-sharepoint-server
 uv

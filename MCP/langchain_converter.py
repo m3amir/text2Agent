@@ -1,10 +1,21 @@
 """
-Simple MCP to LangChain Converter
+Simple MCP to LangChain Converter - Connects to stdio server
 """
 import asyncio
+import os
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from contextlib import asynccontextmanager
+
+# Import server functionality
+try:
+    import sys
+    import os
+    sys.path.insert(0, os.path.dirname(__file__))
+    from tool_mcp_server import get_server
+    SERVER_AVAILABLE = True
+except ImportError:
+    SERVER_AVAILABLE = False
 
 try:
     from langchain_mcp_adapters.tools import load_mcp_tools
@@ -12,14 +23,21 @@ try:
 except ImportError:
     LANGCHAIN_AVAILABLE = False
 
-async def convert_mcp_to_langchain(server_command="python", server_args=["MCP/tool_mcp_server.py"]):
+# Server parameters for our universal tool server
+TOOL_SERVER_COMMAND = "python"
+TOOL_SERVER_ARGS = [os.path.join(os.path.dirname(__file__), "tool_mcp_server.py")]
+
+async def convert_mcp_to_langchain(server_command=None, server_args=None):
     """Convert MCP tools to LangChain format"""
     
     if not LANGCHAIN_AVAILABLE:
         return []
     
-    if not server_command or not server_args:
-        return []
+    # Use default server if none specified
+    if not server_command:
+        server_command = TOOL_SERVER_COMMAND
+    if not server_args:
+        server_args = TOOL_SERVER_ARGS
     
     server_params = StdioServerParameters(command=server_command, args=server_args)
     
@@ -28,19 +46,22 @@ async def convert_mcp_to_langchain(server_command="python", server_args=["MCP/to
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 return await load_mcp_tools(session)
-    except Exception:
+    except Exception as e:
+        print(f"Error connecting to MCP server: {e}")
         return []
 
 @asynccontextmanager
-async def get_mcp_tools_with_session(server_command="python", server_args=["MCP/tool_mcp_server.py"]):
+async def get_mcp_tools_with_session(server_command=None, server_args=None):
     """Get MCP tools with an active session context"""
     if not LANGCHAIN_AVAILABLE:
         yield []
         return
     
-    if not server_command or not server_args:
-        yield []
-        return
+    # Use default server if none specified
+    if not server_command:
+        server_command = TOOL_SERVER_COMMAND
+    if not server_args:
+        server_args = TOOL_SERVER_ARGS
     
     server_params = StdioServerParameters(command=server_command, args=server_args)
     
@@ -54,7 +75,7 @@ async def get_mcp_tools_with_session(server_command="python", server_args=["MCP/
         print(f"Error creating MCP session: {e}")
         yield []
 
-async def get_specific_tool(tool_name, server_command="python", server_args=["MCP/tool_mcp_server.py"]):
+async def get_specific_tool(tool_name, server_command=None, server_args=None):
     """Get a specific tool by name"""
     tools = await convert_mcp_to_langchain(server_command, server_args)
     
@@ -68,85 +89,108 @@ async def get_specific_tool(tool_name, server_command="python", server_args=["MC
     
     return None
 
-def print_tool_arguments(tool):
-    """Print tool arguments in a readable format"""
-    if not tool:
-        print("No tool provided")
-        return
+async def get_connectors_tools_formatted(connector_names, tools=None):
+    """
+    Get formatted string of tools for a list of connectors
     
-    print(f"\n📋 Tool: {tool.name}")
-    print(f"📝 Description: {tool.description}")
+    Args:
+        connector_names (list): List of connector names (e.g., ['sharepoint', 'ms365'])
+        tools (list, optional): Pre-loaded tools list to avoid reconnecting
     
-    if hasattr(tool, 'args_schema') and tool.args_schema:
-        schema = tool.args_schema
-        print(f"\n🔧 Arguments Schema:")
-        print(f"   Type: {schema.get('type', 'unknown')}")
+    Returns:
+        str: Formatted string with tools, descriptions, and argument schemas
+    """
+    if not isinstance(connector_names, list):
+        connector_names = [connector_names]
+    
+    result_parts = []
+    
+    try:
+        # Use provided tools or connect to get them
+        if tools is None:
+            async with get_mcp_tools_with_session() as session_tools:
+                tools = session_tools
         
-        properties = schema.get('properties', {})
-        required = schema.get('required', [])
-        
-        if properties:
-            print(f"\n📥 Parameters:")
-            for param_name, param_info in properties.items():
-                is_required = param_name in required
-                required_text = "✅ REQUIRED" if is_required else "⚪ Optional"
-                param_type = param_info.get('type', 'unknown')
-                description = param_info.get('description', 'No description')
+        for connector_name in connector_names:
+            connector_tools = []
+            
+            # Filter tools for this connector
+            for tool in tools:
+                tool_name = getattr(tool, 'name', getattr(tool, '_name', str(tool)))
+                if tool_name.lower().startswith(f"{connector_name.lower()}_"):
+                    connector_tools.append(tool)
+            
+            if connector_tools:
+                # Format this connector's section
+                connector_section = f"\n🔧 **{connector_name.upper()} CONNECTOR** ({len(connector_tools)} tools)\n" + "="*60 + "\n"
                 
-                print(f"   • {param_name} ({param_type}) - {required_text}")
-                print(f"     └─ {description}")
+                for i, tool in enumerate(connector_tools, 1):
+                    tool_name = getattr(tool, 'name', str(tool))
+                    description = getattr(tool, 'description', 'No description available')
+                    
+                    tool_section = f"\n{i:2d}. **{tool_name}**\n"
+                    tool_section += f"    📝 Description: {description}\n"
+                    
+                    # Add argument schema if available
+                    if hasattr(tool, 'args_schema') and tool.args_schema:
+                        schema = tool.args_schema
+                        properties = schema.get('properties', {})
+                        required = schema.get('required', [])
+                        
+                        if properties:
+                            tool_section += "    🔧 Parameters:\n"
+                            for param_name, param_info in properties.items():
+                                is_required = param_name in required
+                                required_text = "✅ REQUIRED" if is_required else "⚪ Optional"
+                                param_type = param_info.get('type', 'unknown')
+                                param_desc = param_info.get('description', 'No description')
+                                
+                                tool_section += f"       • {param_name} ({param_type}) - {required_text}\n"
+                                tool_section += f"         └─ {param_desc}\n"
+                        else:
+                            tool_section += "    🔧 No parameters required\n"
+                    else:
+                        tool_section += "    ⚠️  No schema information available\n"
+                    
+                    tool_section += "    " + "-"*50 + "\n"
+                    connector_section += tool_section
                 
-                # Show additional constraints
-                if 'minimum' in param_info:
-                    print(f"     └─ Minimum: {param_info['minimum']}")
-                if 'items' in param_info:
-                    print(f"     └─ Items type: {param_info['items'].get('type', 'unknown')}")
+                result_parts.append(connector_section)
+            else:
+                result_parts.append(f"\n❌ **{connector_name.upper()} CONNECTOR** - No tools found\n")
         
-        if required:
-            print(f"\n✅ Required Parameters: {', '.join(required)}")
+        return "\n".join(result_parts) if result_parts else "❌ No tools found for any connector"
         
-        print(f"\n🔄 Response Format: {getattr(tool, 'response_format', 'unknown')}")
-    else:
-        print("No argument schema available")
+    except Exception as e:
+        return f"❌ Error retrieving tools: {str(e)}"
 
 async def main():
-    """Convert and return LangChain tools, specifically looking for SharePoint tools"""
-    # Get all tools first (just to count them)
-    tools = await convert_mcp_to_langchain()
-    print(f"Converted {len(tools)} tools")
+    """Test the get_connectors_tools_formatted function with debugging"""
+    print("🧪 Testing get_connectors_tools_formatted function...\n")
     
-    # Now use the session context manager to actually use the tools
-    async with get_mcp_tools_with_session() as session_tools:
-        # Find the SharePoint tool
-        sharepoint_tool = None
+    try:
+        # Connect once and reuse the tools
+        print("🔌 Testing basic MCP connection...")
+        async with get_mcp_tools_with_session() as tools:
+            print(f"✅ Connected! Found {len(tools)} tools")
+            
+            # Show first few tool names
+            print("\n📋 First 5 tools:")
+            for i, tool in enumerate(tools[:5]):
+                tool_name = getattr(tool, 'name', str(tool))
+                print(f"  {i+1}. {tool_name}")
+            
+            print("\n" + "-"*50)
+            print("🧪 Testing formatter with SharePoint connector...")
+            
+            # Test with tools already loaded
+            formatted_output = await get_connectors_tools_formatted(['sharepoint'], tools)
+            print(formatted_output)
         
-        print(f"\n🔍 Available tools:")
-        for tool in session_tools:
-            tool_name = getattr(tool, 'name', getattr(tool, '_name', str(tool)))
-            print(f"   • {tool_name}")
-            
-            # Look for SharePoint tool
-            if "sharepoint_List_SharePoint_Folders" in tool_name:
-                sharepoint_tool = tool
-                print(f"✅ Found SharePoint tool: {tool_name}")
-        
-        # Return the SharePoint tool if found
-        if sharepoint_tool:
-            print(f"\n📋 SharePoint Tool Details:")
-            print_tool_arguments(sharepoint_tool)
-            
-            # Try to invoke the tool
-            try:
-                print(f"\n🚀 Invoking SharePoint tool...")
-                result = await sharepoint_tool.ainvoke({})
-                print(f"Result: {result}")
-            except Exception as e:
-                print(f"❌ Error invoking tool: {e}")
-            
-            return sharepoint_tool
-        else:
-            print(f"\n❌ No SharePoint folder tool found")
-            return None
+    except Exception as e:
+        print(f"❌ Error during testing: {e}")
+        import traceback
+        traceback.print_exc()
 
-if __name__ == "__main__":
-    asyncio.run(main()) 
+# if __name__ == "__main__":
+#     asyncio.run(main())

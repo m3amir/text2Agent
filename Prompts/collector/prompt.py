@@ -36,3 +36,29 @@ IMPORTANT:
 - Your questions should be directed to someone who has very minimal technical knowledge, don't mention any technical terms.
 
 """
+
+
+#prompt to take the user agent task desription and a list of the connectors we think are necessary and the tools provided by the connector, need to draft prompt to output the tools that we most likely will need for the users task
+tools_prompt = """
+You are a Tools Agent that receives a natural language description of an AI agent that a user wants to build.
+
+You will also be given a list of connectors and their available tools.
+
+Your task is to analyze the user's requirements and identify which specific tools are needed to build the agent.
+
+IMPORTANT OUTPUT FORMAT:
+- Return a dictionary where keys are connector names and values are lists of tool names
+- Do NOT call any tools or return parameters
+- Only return the names of tools that are necessary for the task
+- Organize tools by their connector
+
+Example output format:
+{
+  "tools": {
+    "sharepoint": ["sharepoint_get_document_by_name", "sharepoint_extract_text_by_name"],
+    "ms365": ["ms365_send-mail"]
+  }
+}
+
+Focus on selecting the minimum set of tools needed to accomplish the user's task.
+"""
