@@ -71,18 +71,10 @@ class PromptWarehouse:
         output = ["=" * 60, f"PROMPT WAREHOUSE ({len(prompts)} prompts)", "=" * 60]
         
         for prompt in prompts:
-            # Get latest version
-            try:
-                versions_response = self.client.list_prompts(promptIdentifier=prompt['id'])
-                versions = [p['version'] for p in versions_response.get('promptSummaries', []) if 'version' in p]
-                latest_version = max([int(v) for v in versions if v.isdigit()]) if versions else 1
-            except Exception as e:
-                latest_version = "N/A"
-            
             output.append(f"📝 {prompt['name']}")
             output.append(f"   {prompt['description']}")
             output.append(f"   Updated: {prompt['updatedAt'].strftime('%Y-%m-%d %H:%M')}")
-            output.append(f"   Version: {latest_version}")
+            output.append(f"   ID: {prompt['id']}")
             output.append("-" * 60)
         
         return "\n".join(output)
@@ -101,13 +93,8 @@ class PromptWarehouse:
             if not prompt_id:
                 return None
             
-            # Get versions and find latest
-            versions_response = self.client.list_prompts(promptIdentifier=prompt_id)
-            versions = [p['version'] for p in versions_response.get('promptSummaries', []) if 'version' in p]
-            latest_version = max([int(v) for v in versions if v.isdigit()]) if versions else "1"
-            
-            # Get the prompt content
-            prompt_response = self.client.get_prompt(promptIdentifier=prompt_id, promptVersion=str(latest_version))
+            # Get the prompt content (latest version by default)
+            prompt_response = self.client.get_prompt(promptIdentifier=prompt_id)
             return prompt_response['variants'][0]['templateConfiguration']['text']['text']
             
         except Exception as e:

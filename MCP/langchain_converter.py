@@ -181,10 +181,10 @@ async def main():
                 print(f"  {i+1}. {tool_name}")
             
             print("\n" + "-"*50)
-            print("🧪 Testing formatter with SharePoint connector...")
+            print("🧪 Testing formatter with Microsoft connector...")
             
             # Test with tools already loaded
-            formatted_output = await get_connectors_tools_formatted(['sharepoint'], tools)
+            formatted_output = await get_connectors_tools_formatted(['microsoft'], tools)
             print(formatted_output)
         
     except Exception as e:

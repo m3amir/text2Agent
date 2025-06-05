@@ -55,8 +55,7 @@ IMPORTANT OUTPUT FORMAT:
 Example output format:
 {
   "tools": {
-    "sharepoint": ["sharepoint_get_document_by_name", "sharepoint_extract_text_by_name"],
-    "ms365": ["ms365_send-mail"]
+    "microsoft": ["microsoft_get_document_by_name", "microsoft_extract_text_by_name"]
   }
 }
 

@@ -122,40 +122,79 @@ class Collector:
         state['connectors'] = valid_connectors
         state['connector_tools'] = self.load_connector_tools(valid_connectors)
         tools = self.format_tools(state['connector_tools'])
-        prompt = tools_prompt + "\n\n" + "User Agent Description: " + state['input'] + "\n\n" + "Available Tools: " + tools
+        prompt = self.warehouse.get_prompt('tools') + "\n\n" + "User Agent Description: " + state['input'] + "\n\n" + "Available Tools: " + tools
+        print("prompt", prompt)
         chosen_tools = llm.formatted(prompt, toolsResponse)
         print("chosen_tools", chosen_tools)
         return state
 
     def load_connector_tools(self, valid_connectors):
-        connector_tools = {}
+        import sys
+        import os
+        sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+        from Global.Collector.connectors import get_multiple_connector_tools_sync
         
-        if valid_connectors and get_mcp_tools_with_session:
-            async def get_tools():
-                async with get_mcp_tools_with_session() as all_tools:
-                    for connector_name in valid_connectors:
-                        connector_tools[connector_name] = {}
-                        for tool in all_tools:
-                            tool_name = getattr(tool, 'name', str(tool))
-                            if tool_name.lower().startswith(f"{connector_name.lower()}_"):
-                                connector_tools[connector_name][tool_name] = {
-                                    'description': getattr(tool, 'description', 'No description available'),
-                                    'argument_schema': getattr(tool, 'args_schema', None) if hasattr(tool, 'args_schema') else None
-                                }
+        # Use batch loading to avoid multiple MCP session initializations
+        try:
+            all_tools_data = get_multiple_connector_tools_sync(valid_connectors)
+            connector_tools = {}
             
-            asyncio.run(get_tools())
-        
-        # Add placeholders for connectors without tools
-        for connector_name in valid_connectors:
-            if not connector_tools.get(connector_name):
-                connector_tools[connector_name] = {
-                    f"{connector_name}_placeholder": {
-                        'description': f"Tools from {connector_name} connector",
-                        'argument_schema': None
+            for connector_name in valid_connectors:
+                tools_data = all_tools_data.get(connector_name, {})
+                if tools_data and tools_data.get('tool_count', 0) > 0:
+                    # Convert the tool format to the expected format
+                    formatted_tools = {}
+                    for tool_name, tool_info in tools_data.get('tool_schemas', {}).items():
+                        formatted_tools[tool_name] = {
+                            'description': tool_info.get('description', 'No description available'),
+                            'argument_schema': tool_info.get('args_schema', None)
+                        }
+                    connector_tools[connector_name] = formatted_tools
+                else:
+                    # Add placeholder if no tools found
+                    connector_tools[connector_name] = {
+                        f"{connector_name}_placeholder": {
+                            'description': f"Tools from {connector_name} connector",
+                            'argument_schema': None
+                        }
                     }
-                }
-        
-        return connector_tools
+            
+            return connector_tools
+            
+        except Exception as e:
+            print(f"Error loading tools in batch: {e}")
+            # Fallback to individual loading if batch fails
+            from Global.Collector.connectors import get_connector_tools_sync
+            connector_tools = {}
+            
+            for connector_name in valid_connectors:
+                try:
+                    tools_data = get_connector_tools_sync(connector_name)
+                    if tools_data and tools_data.get('tool_count', 0) > 0:
+                        formatted_tools = {}
+                        for tool_name, tool_info in tools_data.get('tool_schemas', {}).items():
+                            formatted_tools[tool_name] = {
+                                'description': tool_info.get('description', 'No description available'),
+                                'argument_schema': tool_info.get('args_schema', None)
+                            }
+                        connector_tools[connector_name] = formatted_tools
+                    else:
+                        connector_tools[connector_name] = {
+                            f"{connector_name}_placeholder": {
+                                'description': f"Tools from {connector_name} connector",
+                                'argument_schema': None
+                            }
+                        }
+                except Exception as e:
+                    print(f"Error loading tools for {connector_name}: {e}")
+                    connector_tools[connector_name] = {
+                        f"{connector_name}_placeholder": {
+                            'description': f"Tools from {connector_name} connector (error: {str(e)})",
+                            'argument_schema': None
+                        }
+                    }
+            
+            return connector_tools
     
     async def collect(self, state):
         llm = LLM()
@@ -251,6 +290,5 @@ if __name__ == "__main__":
         
         print("\n✅ All questions answered! Processing your responses...")
         connectors = asyncio.run(graph.ainvoke(Command(resume={"questions": response}), config=config))['connectors']
-        print(f"\n🎯 Final connectors selected: {connectors}")
     else:
         print("No interrupt occurred - process completed without feedback questions.")

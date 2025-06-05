@@ -20,3 +20,6 @@ python-dotenv
 flask
 langchain_aws
 uv
+authlib
+werkzeug
+requests

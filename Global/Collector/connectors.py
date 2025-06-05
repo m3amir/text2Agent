@@ -1,13 +1,12 @@
 """
 Dynamic MCP Connector Discovery
-Reads MCP server configuration and provides connector information
 """
 import json
 import os
 import sys
-import glob
 import importlib.util
 import asyncio
+import inspect
 from pathlib import Path
 
 # Add project root to path for imports
@@ -15,7 +14,6 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 
 # Import MCP functionality
 try:
-    # Import get_mcp_tools_with_session from langchain_converter
     converter_path = os.path.join(os.path.dirname(__file__), '..', '..', 'MCP', 'langchain_converter.py')
     spec = importlib.util.spec_from_file_location("langchain_converter", converter_path)
     langchain_converter = importlib.util.module_from_spec(spec)
@@ -25,185 +23,170 @@ except Exception as e:
     print(f"Failed to import langchain_converter: {e}")
     get_mcp_tools_with_session = None
 
-def load_mcp_servers_config():
+def _load_config():
     """Load MCP servers configuration from JSON file"""
     config_path = Path(__file__).parent.parent.parent / "MCP" / "Config" / "mcp_servers_config.json"
-    
     try:
         with open(config_path, 'r') as f:
-            config = json.load(f)
-        return config.get("mcpServers", {})
+            return json.load(f)
     except Exception as e:
         print(f"Failed to load MCP config: {e}")
         return {}
 
-def discover_connectors_from_config():
-    """Discover connectors from MCP configuration file"""
-    servers_config = load_mcp_servers_config()
-    connectors_dict = {}
+def load_connectors():
+    """Load connectors from MCP configuration"""
+    config = _load_config()
+    connectors = {}
     
-    for server_name, server_config in servers_config.items():
-        # Extract prefix for this server
+    # Add remote MCP connectors
+    for server_name, server_config in config.get("mcpServers", {}).items():
         prefix = server_config.get("prefix", server_name)
         description = server_config.get("description", f"Tools from {server_name}")
+        connectors[prefix] = description
+    
+    # Add local connectors
+    for connector_name, config_data in config.get("local", {}).items():
+        description = config_data.get("description", f"Available tools for {connector_name}")
+        tool_path = Path(__file__).parent.parent.parent / config_data.get("path", f"Tools/{connector_name.capitalize()}") / "tool.py"
         
-        connectors_dict[prefix] = description
+        if tool_path.exists():
+            connectors[connector_name] = description
+        else:
+            print(f"Warning: Tool file not found for {connector_name} at {tool_path}")
     
-    return connectors_dict
+    return connectors
 
-def get_local_tool_description(connector_name, tool_path):
-    """Get description from local tool.py file"""
-    try:
-        if os.path.exists(tool_path):
-            # Import the tool module
-            spec = importlib.util.spec_from_file_location(f"{connector_name}_tool", tool_path)
-            module = importlib.util.module_from_spec(spec)
-            
-            # Add tool directory to path temporarily
-            tool_dir = os.path.dirname(tool_path)
-            sys.path.insert(0, tool_dir)
-            spec.loader.exec_module(module)
-            sys.path.remove(tool_dir)
-            
-            # Get description variable if it exists
-            if hasattr(module, 'description'):
-                return module.description
+def _extract_tool_schema(func, tool_name):
+    """Extract schema information from a function"""
+    sig = inspect.signature(func)
+    properties = {}
+    required = []
+    
+    for param_name, param in sig.parameters.items():
+        param_type = 'string'
+        if param.annotation != inspect.Parameter.empty:
+            if param.annotation == int:
+                param_type = 'integer'
+            elif param.annotation == bool:
+                param_type = 'boolean'
+            elif param.annotation == list:
+                param_type = 'array'
         
-        return f"Available tools for {connector_name}"
-    except Exception as e:
-        print(f"Failed to load description for {connector_name}: {e}")
-        return f"Available tools for {connector_name}"
+        properties[param_name] = {
+            'type': param_type,
+            'description': f"Parameter {param_name}"
+        }
+        
+        if param.default == inspect.Parameter.empty:
+            required.append(param_name)
+    
+    return {
+        'name': tool_name,
+        'description': func.__doc__ or f"Local tool: {tool_name}",
+        'args_schema': {
+            'type': 'object',
+            'properties': properties,
+            'required': required,
+            'description': f"Arguments for {tool_name}"
+        } if properties else None
+    }
 
-def discover_local_tools():
-    """Discover local tools from Tools directory"""
-    local_connectors = {}
-    tools_dir = Path(__file__).parent.parent.parent / "Tools"
+def _load_local_tools(connector_name):
+    """Load tools for a specific local connector"""
+    config = _load_config()
+    local_section = config.get("local", {})
     
-    # Also load local config descriptions
-    config_path = Path(__file__).parent.parent.parent / "MCP" / "Config" / "mcp_servers_config.json"
-    local_config_descriptions = {}
+    if connector_name not in local_section:
+        return {}
     
-    try:
-        with open(config_path, 'r') as f:
-            config = json.load(f)
-            local_section = config.get("local", {})
-            for name, config_data in local_section.items():
-                local_config_descriptions[name] = config_data.get("description", f"Available tools for {name}")
-    except Exception as e:
-        print(f"Failed to load local descriptions from config: {e}")
+    connector_config = local_section[connector_name]
+    tool_path = Path(__file__).parent.parent.parent / connector_config.get("path", f"Tools/{connector_name.capitalize()}") / "tool.py"
+    
+    if not tool_path.exists():
+        return {}
     
     try:
-        for tool_file in glob.glob(os.path.join(tools_dir, "*/tool.py")):
-            connector_name = os.path.basename(os.path.dirname(tool_file)).lower()
-            
-            # Use config description if available, otherwise get from tool file
-            if connector_name in local_config_descriptions:
-                description = local_config_descriptions[connector_name]
-            else:
-                description = get_local_tool_description(connector_name, tool_file)
-                
-            local_connectors[connector_name] = description
-            
-        return local_connectors
+        # Import the tool module
+        spec = importlib.util.spec_from_file_location(f"{connector_name}_tool", tool_path)
+        module = importlib.util.module_from_spec(spec)
+        
+        tool_dir = os.path.dirname(tool_path)
+        sys.path.insert(0, tool_dir)
+        spec.loader.exec_module(module)
+        sys.path.remove(tool_dir)
+        
+        # Find all functions that start with connector_name_
+        tool_schemas = {}
+        for attr_name in dir(module):
+            if attr_name.startswith(f"{connector_name}_") and callable(getattr(module, attr_name)):
+                func = getattr(module, attr_name)
+                tool_schemas[attr_name] = _extract_tool_schema(func, attr_name)
+        
+        return tool_schemas
+        
     except Exception as e:
-        print(f"Failed to discover local tools: {e}")
+        print(f"❌ Error loading local tools for connector '{connector_name}': {e}")
         return {}
 
-def load_connectors():
-    """Load connectors from MCP configuration and local tools"""
-    try:
-        # Load remote MCP connectors from config
-        remote_connectors = discover_connectors_from_config()
-        
-        # Load local tools from Tools directory
-        local_connectors = discover_local_tools()
-        
-        # Combine both (local tools take precedence for descriptions)
-        all_connectors = {**remote_connectors, **local_connectors}
-        
-        return all_connectors
-    except Exception as e:
-        print(f"Failed to discover connectors: {e}")
-        return {}
-
-def get_connectors():
-    """Get the discovered connectors dictionary"""
-    return load_connectors()
-
-async def get_connector_tools(connector_name):
-    """
-    Get tools associated with a specific connector name from the MCP server
+async def get_multiple_connector_tools(connector_names):
+    """Get tools for multiple connectors in a single MCP session"""
+    all_connector_tools = {}
     
-    Args:
-        connector_name (str): Name of the connector (e.g., 'sharepoint', 'ms365')
-    
-    Returns:
-        dict: Dictionary containing:
-            - 'tools': List of tool objects
-            - 'tool_schemas': Dictionary mapping tool names to their argument schemas
-            - 'tool_count': Number of tools found
-    """
-    if get_mcp_tools_with_session is None:
-        print("❌ MCP tools not available - langchain_converter import failed")
-        return {'tools': [], 'tool_schemas': {}, 'tool_count': 0}
-        
-    try:
-        async with get_mcp_tools_with_session() as session_tools:
-            connector_tools = []
-            tool_schemas = {}
-            
-            # Filter tools that match the connector name
-            for tool in session_tools:
-                tool_name = getattr(tool, 'name', getattr(tool, '_name', str(tool)))
-                
-                # Check if tool belongs to this connector (starts with connector_name_)
-                if tool_name.lower().startswith(f"{connector_name.lower()}_"):
-                    connector_tools.append(tool)
-                    
-                    # Extract tool argument schema
-                    tool_schema = {
-                        'name': tool_name,
-                        'description': getattr(tool, 'description', 'No description available'),
-                        'args_schema': None
-                    }
-                    
-                    # Get argument schema if available
-                    if hasattr(tool, 'args_schema') and tool.args_schema:
-                        schema = tool.args_schema
-                        tool_schema['args_schema'] = {
-                            'type': schema.get('type', 'object'),
-                            'properties': schema.get('properties', {}),
-                            'required': schema.get('required', []),
-                            'description': schema.get('description', '')
-                        }
-                    
-                    tool_schemas[tool_name] = tool_schema
-            
-            return {
-                'tools': connector_tools,
-                'tool_schemas': tool_schemas,
-                'tool_count': len(connector_tools)
-            }
-            
-    except Exception as e:
-        print(f"❌ Error getting tools for connector '{connector_name}': {e}")
-        return {
+    # Initialize results
+    for connector_name in connector_names:
+        all_connector_tools[connector_name] = {
             'tools': [],
             'tool_schemas': {},
             'tool_count': 0
         }
+    
+    # Load MCP tools once for all connectors
+    if get_mcp_tools_with_session is not None:
+        try:
+            async with get_mcp_tools_with_session() as session_tools:
+                for tool in session_tools:
+                    tool_name = getattr(tool, 'name', getattr(tool, '_name', str(tool)))
+                    
+                    for connector_name in connector_names:
+                        if tool_name.lower().startswith(f"{connector_name.lower()}_"):
+                            all_connector_tools[connector_name]['tools'].append(tool)
+                            
+                            tool_schema = {
+                                'name': tool_name,
+                                'description': getattr(tool, 'description', 'No description available'),
+                                'args_schema': None
+                            }
+                            
+                            if hasattr(tool, 'args_schema') and tool.args_schema:
+                                schema = tool.args_schema
+                                tool_schema['args_schema'] = {
+                                    'type': schema.get('type', 'object'),
+                                    'properties': schema.get('properties', {}),
+                                    'required': schema.get('required', []),
+                                    'description': schema.get('description', '')
+                                }
+                            
+                            all_connector_tools[connector_name]['tool_schemas'][tool_name] = tool_schema
+                            break
+        except Exception as e:
+            print(f"❌ Error getting MCP tools: {e}")
+    
+    # Load local tools for each connector
+    for connector_name in connector_names:
+        local_tools = _load_local_tools(connector_name)
+        all_connector_tools[connector_name]['tool_schemas'].update(local_tools)
+        all_connector_tools[connector_name]['tool_count'] = len(all_connector_tools[connector_name]['tool_schemas'])
+    
+    return all_connector_tools
+
+def get_multiple_connector_tools_sync(connector_names):
+    """Synchronous wrapper for get_multiple_connector_tools"""
+    return asyncio.run(get_multiple_connector_tools(connector_names))
 
 def get_connector_tools_sync(connector_name):
-    """
-    Synchronous wrapper for get_connector_tools
-    
-    Args:
-        connector_name (str): Name of the connector
-    
-    Returns:
-        dict: Same as get_connector_tools
-    """
-    return asyncio.run(get_connector_tools(connector_name))
+    """Get tools for a single connector"""
+    result = get_multiple_connector_tools_sync([connector_name])
+    return result.get(connector_name, {'tools': [], 'tool_schemas': {}, 'tool_count': 0})
 
 def print_connector_tools(connector_names):
     """

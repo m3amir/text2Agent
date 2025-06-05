@@ -56,26 +56,77 @@ class UniversalToolServer:
                 tool_file = os.path.join(base_dir, tool_config["path"], "tool.py")
                 spec = importlib.util.spec_from_file_location(f"{tool_name}_tool", tool_file)
                 module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(module)
                 
-                # Find tool class and methods
+                # Add tool directory to path temporarily
+                tool_dir = os.path.dirname(tool_file)
+                sys.path.insert(0, tool_dir)
+                spec.loader.exec_module(module)
+                sys.path.remove(tool_dir)
+                
+                methods_found = 0
+                
+                # Look for standalone functions with tool name prefix
+                for attr_name in dir(module):
+                    if attr_name.startswith(f"{tool_name}_") and callable(getattr(module, attr_name)) and not attr_name.startswith('_'):
+                        func = getattr(module, attr_name)
+                        
+                        # Get function signature for input schema
+                        sig = inspect.signature(func)
+                        properties = {}
+                        required = []
+                        
+                        for param_name, param in sig.parameters.items():
+                            param_type = 'string'  # Default type
+                            if param.annotation != inspect.Parameter.empty:
+                                if param.annotation == int:
+                                    param_type = 'integer'
+                                elif param.annotation == bool:
+                                    param_type = 'boolean'
+                                elif param.annotation == list:
+                                    param_type = 'array'
+                            
+                            properties[param_name] = {
+                                'type': param_type,
+                                'description': f"Parameter {param_name}"
+                            }
+                            
+                            if param.default == inspect.Parameter.empty:
+                                required.append(param_name)
+                        
+                        input_schema = {
+                            "type": "object",
+                            "properties": properties,
+                            "required": required
+                        }
+                        
+                        self.tools.append(Tool(
+                            name=attr_name,
+                            description=func.__doc__ or f"Tool function: {attr_name}",
+                            inputSchema=input_schema
+                        ))
+                        self.handlers[attr_name] = self._make_function_handler(func)
+                        methods_found += 1
+                
+                # Also check for tool class methods (legacy support)
                 tool_class = next((obj for name, obj in inspect.getmembers(module) 
                                  if inspect.isclass(obj) and 'Tool' in name and name != 'Tool'), None)
                 
                 if tool_class:
-                    methods = [name for name in dir(tool_class) 
-                             if name.startswith(f"{tool_name}_") and not name.startswith('_')]
+                    class_methods = [name for name in dir(tool_class) 
+                                   if name.startswith(f"{tool_name}_") and not name.startswith('_')]
                     
-                    # Register methods
-                    for method_name in methods:
+                    # Register class methods
+                    for method_name in class_methods:
                         self.tools.append(Tool(
                             name=method_name,
                             description=inspect.getdoc(getattr(tool_class, method_name)) or method_name,
                             inputSchema={"type": "object", "properties": {}, "required": []}
                         ))
                         self.handlers[method_name] = self._make_handler(tool_class, method_name)
-                    
-                    print(f"📁 {tool_name} ({len(methods)} methods)", file=sys.stderr)
+                        methods_found += 1
+                
+                print(f"📁 {tool_name} ({methods_found} methods)", file=sys.stderr)
+                
             except Exception as e:
                 print(f"❌ {tool_name}: {e}", file=sys.stderr)
     
@@ -153,6 +204,20 @@ class UniversalToolServer:
                     return result if isinstance(result, list) else [TextContent(type="text", text=str(result))]
         except Exception as e:
             return [TextContent(type="text", text=f"Error: {str(e)}")]
+
+    def _make_function_handler(self, func):
+        """Create handler for standalone function"""
+        async def handler(arguments: Dict[str, Any]):
+            try:
+                result = func(**arguments)
+                
+                if inspect.iscoroutine(result):
+                    result = await result
+                
+                return [TextContent(type="text", text=str(result))]
+            except Exception as e:
+                return [TextContent(type="text", text=f"Error: {str(e)}")]
+        return handler
 
 async def main():
     """Run the MCP server"""

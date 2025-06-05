@@ -2,7 +2,12 @@ import requests
 import json
 import asyncio
 import io
+import sys
+import os
 from typing import Dict, List
+
+# Add project root to Python path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 from Global.llm import LLM
 
 try:
@@ -12,7 +17,7 @@ try:
 except ImportError:
     EXTRACTION_AVAILABLE = False
 
-class SharepointToolkit:
+class MicrosoftToolkit:
     def __init__(self, credentials: Dict[str, str]):
         self.tenant_id = credentials.get('tenant_id')
         self.client_id = credentials.get('client_id') 
@@ -54,7 +59,7 @@ class SharepointToolkit:
         }
 
     # EMAIL OPERATIONS
-    def mail_send_email_as_user(self, sender_email: str, recipients: List[str], subject: str, body: str,
+    def microsoft_mail_send_email_as_user(self, sender_email: str, recipients: List[str], subject: str, body: str,
                                body_type: str = "HTML", cc_emails: List[str] = None, bcc_emails: List[str] = None,
                                attachments: List[Dict] = None) -> str:
         return asyncio.run(self._send_email_as_user_async(sender_email, recipients, subject, body, body_type, cc_emails, bcc_emails, attachments))
@@ -135,7 +140,7 @@ class SharepointToolkit:
             return json.dumps({"error": f"Exception: {str(e)}", "success": False})
 
     # CALENDAR OPERATIONS
-    def calendar_create_event(self, user_email: str, subject: str, start_time: str, end_time: str, 
+    def microsoft_calendar_create_event(self, user_email: str, subject: str, start_time: str, end_time: str, 
                             location: str = "", body: str = "", attendees: List[str] = None, 
                             create_teams_meeting: bool = False) -> str:
         return asyncio.run(self._create_event_async(user_email, subject, start_time, end_time, location, body, attendees, create_teams_meeting))
@@ -189,7 +194,7 @@ class SharepointToolkit:
         except Exception as e:
             return json.dumps({"error": f"Exception: {str(e)}", "success": False})
     
-    def calendar_list_events(self, user_email: str, start_date: str = None, end_date: str = None, limit: int = 10) -> str:
+    def microsoft_calendar_list_events(self, user_email: str, start_date: str = None, end_date: str = None, limit: int = 10) -> str:
         return asyncio.run(self._list_events_async(user_email, start_date, end_date, limit))
     
     async def _list_events_async(self, user_email: str, start_date: str = None, end_date: str = None, limit: int = 10) -> str:
@@ -233,7 +238,7 @@ class SharepointToolkit:
         except Exception as e:
             return json.dumps({'error': f"Exception: {str(e)}", 'success': False})
     
-    def calendar_delete_event(self, user_email: str, event_id: str) -> str:
+    def microsoft_calendar_delete_event(self, user_email: str, event_id: str) -> str:
         return asyncio.run(self._delete_event_async(user_email, event_id))
     
     async def _delete_event_async(self, user_email: str, event_id: str) -> str:
@@ -295,7 +300,7 @@ class SharepointToolkit:
         except:
             return []
     
-    def sharepoint_search_files(self, query: str, drive_name: str = "Documents", file_type: str = None) -> str:
+    def microsoft_sharepoint_search_files(self, query: str, drive_name: str = "Documents", file_type: str = None) -> str:
         return asyncio.run(self._search_files_async(query, drive_name, file_type))
     
     async def _search_files_async(self, query: str, drive_name: str = "Documents", file_type: str = None) -> str:
@@ -338,7 +343,7 @@ class SharepointToolkit:
         except Exception as e:
             return json.dumps({'error': f"Exception: {str(e)}"})
     
-    def sharepoint_download_and_extract_text(self, file_id: str, drive_name: str = "Documents") -> str:
+    def microsoft_sharepoint_download_and_extract_text(self, file_id: str, drive_name: str = "Documents") -> str:
         return asyncio.run(self._download_and_extract_text_async(file_id, drive_name))
     
     async def _download_and_extract_text_async(self, file_id: str, drive_name: str = "Documents") -> str:
