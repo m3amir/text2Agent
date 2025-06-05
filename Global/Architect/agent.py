@@ -79,6 +79,59 @@ class State(TypedDict):
 # ────────────────────────────────────────────────────────────────────────────────
 # Architect agent implementation
 # ────────────────────────────────────────────────────────────────────────────────
+SYSTEM_PROMPT="""
+You are **Architect**, a senior LangGraph‑design assistant.
+
+Your mission
+------------
+Take a set of tools together with a plain‑language *agent goal* you must create a *LangGraph definition* (nodes + edges + state schema)  
+and return a **single JSON object** that fully describes the workflow.
+
+Input
+~~~~~
+1. `agent_goal` – a short description of what the agent should accomplish.
+2. A Python (or pseudo‑Python) snippet showing:
+   • the `State` schema (TypedDict or BaseModel)
+   • all `add_node`, `add_edge`, `add_conditional_edges`, or `Command`‑based
+     control‑flow calls
+   • helper router functions used in conditional edges.
+
+Output
+~~~~~~
+Return **only** valid JSON with these top‑level keys:
+```json
+{{
+  "state_schema": {{"field_name": "type_or_reducer", ...}},
+  "nodes": [
+    {{"name": "...", "purpose": "...", "reads": ["..."], "writes": ["..."], "tools": ["..."]}},
+    ...
+  ],
+  "edges": [
+    {{"source": "...", "target": "...", "edge_type": "normal|conditional|command", "condition": "..." | null}},
+    ...
+  ],
+  "entry_node": "START" | "<first_node>",
+  "end_node": "END"
+}}
+```
+Style rules
+~~~~~~~~~~~
+* **JSON only** – no extra keys, comments, or prose.
+* Use snake_case for all keys.
+* Keep every string ≤ 120 characters.
+* Do not include the backticks shown in the examples.
+
+Helpful LangGraph reminders (do not repeat in output)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+* Nodes are added via `add_node(name, func)`.
+* Normal edges use `add_edge(source, target)`.
+* Conditional routing uses `add_conditional_edges(source, router, mapping)`.
+* Returning `Command(goto=...)` from a node also causes a jump.
+* The graph starts at `START` and ends at `END` sentinel nodes.
+* State keys merge via reducers like `operator.add` unless overridden.
+
+The goal of the agent you will define is {goal}
+"""
 
 class Architect:
     """Architect agent that maps tools + goal → LangGraph configuration."""
@@ -104,13 +157,11 @@ class Architect:
         llm = LLM()  # Initialise LLM helper
 
         # Build descriptive prompt listing each tool for the LLM to analyse
-        prompt = (
-            "You are a senior software architect. Given the agent goal:\n"
-            f"{state['input']}\n\n"
+        prompt = (SYSTEM_PROMPT.format(goal=f"{state['input']}\n\n"),
             "Here is the list of available tools (name – description):\n"
             + "\n".join(f"- {t['name']}: {t['description']}" for t in state["tools"])
-            + "\n\nReturn a JSON object under key 'workflow_components' grouping tools into logical nodes."
         )
+        # Try look at langgraph documentation to explain the definition of a logical node
 
         # Use the Pydantic model to coerce/validate the LLM output
         response = llm.formatted(prompt, ToolAnalysisResponse)
@@ -137,7 +188,7 @@ class Architect:
         """Ask the LLM to produce runnable Python code for the designed LangGraph."""
         llm = LLM()
         prompt = (
-            "Convert the following LangGraph design spec into full Python code.\n"
+            "Convert the following LangGraph design spec into a JSON format.\n"
             "It must import all necessary modules and compile without modification.\n\n"
             f"Spec:\n{state['draft_workflow']}"
         )
@@ -145,22 +196,22 @@ class Architect:
         state["langgraph_code"] = response.code  # Save code for final output
         return state
 
-    def human_approval(self, state: State) -> State:
-        """Interrupt execution to retrieve answers to feedback questions if needed."""
-        # If answers already collected, continue without new interrupt
-        if state["answered_questions"]:
-            return state
+    # def human_approval(self, state: State) -> State:
+    #     """Interrupt execution to retrieve answers to feedback questions if needed."""
+    #     # If answers already collected, continue without new interrupt
+    #     if state["answered_questions"]:
+    #         return state
 
-        # Request answers from the human user
-        answered = interrupt({"questions": state["feedback_questions"]})
+    #     # Request answers from the human user
+    #     answered = interrupt({"questions": state["feedback_questions"]})
 
-        # Validate structure of the returned dict and persist if non‑empty
-        if isinstance(answered, dict) and "questions" in answered:
-            non_empty = [a for a in answered["questions"].values() if a and str(a).strip()]
-            if non_empty and not state["answered_questions"]:
-                state["answered_questions"].append(answered["questions"])
-                state["reviewed"] = True  # Mark reviewed so we can exit loop
-        return state
+    #     # Validate structure of the returned dict and persist if non‑empty
+    #     if isinstance(answered, dict) and "questions" in answered:
+    #         non_empty = [a for a in answered["questions"].values() if a and str(a).strip()]
+    #         if non_empty and not state["answered_questions"]:
+    #             state["answered_questions"].append(answered["questions"])
+    #             state["reviewed"] = True  # Mark reviewed so we can exit loop
+    #     return state
 
     def output_config(self, state: State) -> State:
         """Final node – simply return the enriched state (code is printed in __main__)."""
@@ -176,27 +227,27 @@ class Architect:
         # Register node functions
         workflow.add_node("collect_tools", self.collect_tools)
         workflow.add_node("analyse_tools", self.analyse_tools)
-        workflow.add_node("draft_workflow", self.draft_workflow)
+        workflow.add_node("design_workflow", self.draft_workflow)
         workflow.add_node("generate_config", self.generate_config)
-        workflow.add_node("human_approval", self.human_approval)
+        # workflow.add_node("human_approval", self.human_approval)
         workflow.add_node("output_config", self.output_config)
 
         # Define linear progression
         workflow.add_edge(START, "collect_tools")
         workflow.add_edge("collect_tools", "analyse_tools")
-        workflow.add_edge("analyse_tools", "draft_workflow")
-        workflow.add_edge("draft_workflow", "generate_config")
-        workflow.add_edge("generate_config", "human_approval")
+        workflow.add_edge("analyse_tools", "design_workflow")
+        workflow.add_edge("design_workflow", "generate_config")
+        # workflow.add_edge("generate_config", "human_approval")
 
-        # Conditional routing based on whether human answers are now present
-        def route_after_approval(s: State):
-            return "output_config" if s["reviewed"] else "analyse_tools"
+        # # Conditional routing based on whether human answers are now present
+        # def route_after_approval(s: State):
+        #     return "output_config" if s["reviewed"] else "analyse_tools"
 
-        workflow.add_conditional_edges(
-            "human_approval",
-            route_after_approval,
-            {"analyse_tools": "analyse_tools", "output_config": "output_config"},
-        )
+        # workflow.add_conditional_edges(
+        #     "human_approval",
+        #     route_after_approval,
+        #     {"analyse_tools": "analyse_tools", "output_config": "output_config"},
+        # )
 
         workflow.add_edge("output_config", END)  # Terminate graph
 
@@ -236,7 +287,6 @@ if __name__ == "__main__":
         "input": agent_description,
         "tools": sample_tools,            # Provide tools directly
         "draft_workflow": {},
-        "langgraph_code": "",
         "feedback_questions": [],
         "answered_questions": [],
         "reviewed": False,
