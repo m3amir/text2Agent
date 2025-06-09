@@ -1,8 +1,6 @@
 import boto3
 import json
-import logging
 import os
-from datetime import datetime
 from typing import Dict, Any, Optional
 import sys
 from pydantic import BaseModel, Field
@@ -128,7 +126,7 @@ class STR:
             similar_tasks = self._format(similar_tasks)
             # Log each similar task in detail
             self._log_similar_tasks(similar_tasks)
-            self.sync_logs()
+            sync_logs_to_s3(self.logger, self.log_manager, force_current=True)
 
             return {
                 'SimilarTasks': similar_tasks,
@@ -174,10 +172,6 @@ class STR:
                 self.logger.info(f"📝 {line}")
         
         self.logger.info(f"📝 === END SIMILAR TASKS ===")
-
-    def sync_logs(self):
-        """Force upload current log file to S3"""
-        return sync_logs_to_s3(self.logger, self.log_manager, force_current=True)
 
 # if __name__ == "__main__":
 #     print("🧪 Testing STR with Orchestration Configuration...")
