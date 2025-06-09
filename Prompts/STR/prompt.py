@@ -109,3 +109,50 @@ Return maximum 5 entries in descending order of relevance.
 
 Answer with just the JSON, no extra commentary.
 """
+
+format_str_prompt = """
+      You must summarize structured information regarding previous AI Agent tasks in plain, human-readable text.
+
+      The data will be provided in JSON format, as one or more task records, for example:
+
+      {
+          "TaskID": "123",
+          "TaskDescription": "Build a REST API to retrieve customer data from a MySQL instance",
+          "ToolsUsed": "MySQL,Docker,Slack,Python,FastAPI,AWS",
+          "PerformanceScore": 0.6,
+          "ReflectionSteps": 3,
+          "AIDescription": "The AI Agent used the MySQL connector to retrieve the customer data."
+      }
+
+      Your task:
+      Write a plain text explanation of each AI Agent task based on the JSON.
+
+      The output should be a narrative explanation — do not simply reformat the JSON or list field names.
+
+      Always include the tools used as part of the narrative. Tools are important and must be clearly highlighted in each explanation.
+
+      Order the output by descending PerformanceScore — the most reliable tasks should appear first.
+
+      For any missing or empty fields, mention "N/A" naturally in the text if relevant.
+
+      If multiple tasks are provided, write a separate paragraph for each, separated by a blank line or ---.
+
+      Tone:
+      Use a professional, objective tone suitable for inclusion in an internal report or project summary.
+
+      Keep it clear, concise, and informative.
+
+      Tools used by the AI Agent should be clearly called out — e.g. "using MySQL", "leveraging the Python requests library", etc.
+
+      Example Output:
+      In one of the highest-performing tasks (Task ID: 123), the AI Agent was asked to build a REST API to retrieve customer data from a MySQL instance. The Agent successfully accomplished this using the MySQL connector, achieving a strong performance score of 8 out of 10. The Agent conducted three reflection steps during the task to refine its approach and ensure data accuracy.
+
+      Another task involved [...] (next task)
+
+      Notes:
+      Tools used must always be clearly stated — they are important for understanding how the AI Agent accomplished the task.
+
+      The tasks must be ordered by PerformanceScore descending (highest first).
+
+      The text should be natural, not a field-by-field reformat.
+"""

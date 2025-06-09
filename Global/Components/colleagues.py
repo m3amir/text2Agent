@@ -14,54 +14,13 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.
 from Prompts.poolOfColleagues.prompt import poc_prompt, poc_judge_prompt
 from Prompts.promptwarehouse import PromptWarehouse
 from Global.llm import LLM
+from utils.core import setup_logging, sync_logs_to_s3
 
 # Import LogManager
 try:
     from Logs.log_manager import LogManager
 except ImportError:
     LogManager = None
-
-def setup_logging(user_email: str, log_manager=None):
-    """Simple logging setup"""
-    logs_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'Logs')
-    os.makedirs(logs_dir, exist_ok=True)
-    
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_file = os.path.join(logs_dir, f"colleagues_{timestamp}.log")
-    
-    # Get the specific logger for AI_Colleagues, don't mess with root logger
-    logger = logging.getLogger('AI_Colleagues')
-    logger.setLevel(logging.INFO)
-    
-    # Clear existing handlers to prevent duplicates
-    if logger.handlers:
-        logger.handlers.clear()
-    
-    # Only add handlers if none exist
-    if not logger.handlers:
-        # File handler
-        file_handler = logging.FileHandler(log_file, mode='w')
-        file_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        file_handler.setFormatter(file_formatter)
-        logger.addHandler(file_handler)
-        
-        # Console handler
-        console_handler = logging.StreamHandler()
-        console_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        console_handler.setFormatter(console_formatter)
-        logger.addHandler(console_handler)
-    
-    # Prevent propagation to avoid duplicate messages from root logger
-    logger.propagate = False
-    
-    logger.info(f"📝 Log file: {log_file}")
-    logger.info(f"👤 User: {user_email}")
-    
-    # Setup auto-sync - moved to main.py for better control
-    if log_manager:
-        logger.info(f"🔄 LogManager ready for sync")
-    
-    return logger
 
 class analysisResponse(BaseModel):
     analysis: str = Field(description="The detailed analysis from the employee")
@@ -79,10 +38,10 @@ class State(TypedDict):
     reviews: Annotated[list, operator.add]
 
 class Colleague:
-    def __init__(self, user_email: str = "amir@m3labs.co.uk", log_manager=None):        
+    def __init__(self, user_email: str = "", log_manager=None):        
         self.user_email = user_email
         self.log_manager = log_manager
-        self.logger = setup_logging(user_email, self.log_manager)
+        self.logger = setup_logging(user_email, 'AI_Colleagues', self.log_manager)
         
         self.logger.info("🔧 Initializing AI Colleagues...")
         self.warehouse = PromptWarehouse('m3')
@@ -185,24 +144,5 @@ class Colleague:
                 self.level += 1
         
         finally:
-            # S3 sync - close log handlers first to ensure file is available
-            self.logger.info("☁️ Syncing logs...")
-            if self.log_manager:
-                try:
-                    # Flush and close file handlers to release file locks
-                    for handler in self.logger.handlers:
-                        if isinstance(handler, logging.FileHandler):
-                            handler.flush()
-                            if hasattr(handler, 'close'):
-                                handler.close()
-                    
-                    # Small delay to ensure file system updates
-                    time.sleep(0.5)
-                    
-                    sync_results = self.log_manager.sync_logs(older_than_hours=0, delete_after_sync=False)
-                    
-                    self.logger.info(f"✅ Synced {len(sync_results['synced'])} files")
-                except Exception as e:
-                    print(f"❌ Sync failed: {e}")
-            else:
-                print("⚠️ No LogManager - local only")
+            # S3 sync using centralized function
+            sync_logs_to_s3(self.logger, self.log_manager, force_current=False)

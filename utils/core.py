@@ -12,6 +12,7 @@ from typing import Optional, Dict, Any
 from contextlib import contextmanager
 from dotenv import load_dotenv
 import yaml
+from datetime import datetime
 
 # Load environment variables
 load_dotenv()
@@ -30,6 +31,124 @@ DB_NAME = 'postgres'
 # Global session and credentials cache
 _aws_session = None
 _db_credentials = None
+
+def setup_logging(user_email: str, component_name: str, log_manager=None):
+    """
+    Centralized logging setup for all components
+    
+    Args:
+        user_email (str): User's email address
+        component_name (str): Name of the component (e.g., 'AI_Colleagues', 'STR')
+        log_manager: Optional LogManager instance for organized directory structure
+    
+    Returns:
+        logging.Logger: Configured logger instance
+    """
+    # Determine logs directory
+    if log_manager and hasattr(log_manager, 'logs_dir'):
+        logs_dir = log_manager.logs_dir
+    else:
+        logs_dir = os.path.join(os.path.dirname(__file__), '..', 'Logs')
+        os.makedirs(logs_dir, exist_ok=True)
+    
+    # Create log filename with timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_filename = f"{component_name.lower()}_{timestamp}.log"
+    log_file = os.path.join(logs_dir, log_filename)
+    
+    # Get component-specific logger
+    logger = logging.getLogger(component_name)
+    logger.setLevel(logging.INFO)
+    
+    # Clear existing handlers to prevent duplicates
+    if logger.handlers:
+        logger.handlers.clear()
+    
+    # Only add handlers if none exist
+    if not logger.handlers:
+        # File handler
+        file_handler = logging.FileHandler(log_file, mode='w')
+        file_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        file_handler.setFormatter(file_formatter)
+        logger.addHandler(file_handler)
+        
+        # Console handler
+        console_handler = logging.StreamHandler()
+        console_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        console_handler.setFormatter(console_formatter)
+        logger.addHandler(console_handler)
+    
+    # Prevent propagation to avoid duplicate messages from root logger
+    logger.propagate = False
+    
+    logger.info(f"📝 Log file: {log_file}")
+    logger.info(f"👤 User: {user_email}")
+    
+    if log_manager:
+        logger.info(f"🔄 LogManager ready for sync")
+    
+    return logger
+
+def sync_logs_to_s3(logger, log_manager, force_current=True):
+    """
+    Centralized log syncing function for all components
+    
+    Args:
+        logger: The component's logger instance
+        log_manager: The LogManager instance 
+        force_current (bool): If True, force upload current log file immediately
+    
+    Returns:
+        bool: True if sync was successful, False otherwise
+    """
+    if not log_manager:
+        print("⚠️ No LogManager - local only")
+        return False
+        
+    try:
+        logger.info("☁️ Syncing logs to S3...")
+        
+        # Flush all handlers to ensure logs are written
+        for handler in logger.handlers:
+            if hasattr(handler, 'flush'):
+                handler.flush()
+                if isinstance(handler, logging.FileHandler) and hasattr(handler, 'close'):
+                    # Close file handlers to release file locks for sync
+                    handler.close()
+        
+        # Small delay to ensure file system updates
+        import time
+        time.sleep(0.5)
+        
+        if force_current:
+            # Get current log file name and force upload
+            current_log_filename = None
+            for handler in logger.handlers:
+                if isinstance(handler, logging.FileHandler):
+                    current_log_filename = os.path.basename(handler.baseFilename)
+                    break
+            
+            if current_log_filename:
+                success = log_manager.force_upload_current_log(current_log_filename)
+                if success:
+                    print(f"✅ Current log uploaded: {current_log_filename}")
+                    return True
+                else:
+                    print(f"❌ Failed to upload: {current_log_filename}")
+                    return False
+            else:
+                print("⚠️ Could not determine current log file name")
+                return False
+        else:
+            # Regular sync (older files)
+            sync_results = log_manager.sync_logs(older_than_hours=0)
+            synced_count = len(sync_results.get('synced', []))
+            print(f"✅ Synced {synced_count} files")
+            return True
+            
+    except Exception as e:
+        print(f"❌ Sync failed: {e}")
+        return False
 
 def get_aws_session():
     """Get or create AWS session"""

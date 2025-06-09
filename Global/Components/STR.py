@@ -5,11 +5,13 @@ import os
 from datetime import datetime
 from typing import Dict, Any, Optional
 import sys
-import time
+from pydantic import BaseModel, Field
 
 # Add the Prompts directory to the path to import PromptWarehouse
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 from Prompts.promptwarehouse import PromptWarehouse
+from Global.llm import LLM
+from utils.core import setup_logging, sync_logs_to_s3
 
 # Import LogManager
 try:
@@ -17,53 +19,14 @@ try:
 except ImportError:
     LogManager = None
 
-def setup_logging(user_email: str, log_manager=None):
-    """Simple logging setup"""
-    # Use LogManager's organized directory if available
-    if log_manager and hasattr(log_manager, 'logs_dir'):
-        logs_dir = log_manager.logs_dir
-    else:
-        logs_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'Logs')
-        os.makedirs(logs_dir, exist_ok=True)
-    
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_file = os.path.join(logs_dir, f"STR_{timestamp}.log")
-    
-    # Get the specific logger for STR
-    logger = logging.getLogger('STR')
-    logger.setLevel(logging.INFO)
-    
-    # Clear existing handlers to prevent duplicates
-    if logger.handlers:
-        logger.handlers.clear()
-    
-    # File handler
-    file_handler = logging.FileHandler(log_file, mode='w')
-    file_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    file_handler.setFormatter(file_formatter)
-    logger.addHandler(file_handler)
-    
-    # Console handler
-    console_handler = logging.StreamHandler()
-    console_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    console_handler.setFormatter(console_formatter)
-    logger.addHandler(console_handler)
-    
-    # Prevent propagation to avoid duplicate messages
-    logger.propagate = False
-    
-    logger.info(f"📝 Log file: {log_file}")
-    logger.info(f"👤 User: {user_email}")
-    
-    if log_manager:
-        logger.info(f"🔄 LogManager ready for sync")
-    
-    return logger
+class FormatResponse(BaseModel):
+    similar_tasks: str = Field(description="The formatted response detailing similar tasks we have previously completed.")
 
 class STR:
-    def __init__(self, user_email: str = "amir@m3labs.co.uk"):
+    def __init__(self, user_email: str = ""):
         """Initialize STR component"""
         self.user_email = user_email
+        self.warehouse = PromptWarehouse('m3')
         
         # Initialize LogManager
         if LogManager is not None:
@@ -76,7 +39,7 @@ class STR:
             self.log_manager = None
         
         # Setup logging
-        self.logger = setup_logging(user_email, self.log_manager)
+        self.logger = setup_logging(user_email, 'STR', self.log_manager)
         
         if self.log_manager:
             self.logger.info("✅ LogManager initialized")
@@ -162,7 +125,7 @@ class STR:
             similar_tasks = parsed_json.get('SimilarTasks', [])
             
             self.logger.info(f"✅ Extracted {len(similar_tasks)} similar tasks")
-            
+            similar_tasks = self._format(similar_tasks)
             # Log each similar task in detail
             self._log_similar_tasks(similar_tasks)
             self.sync_logs()
@@ -189,67 +152,38 @@ class STR:
                 'success': False,
                 'error': str(e)
             }
+        
+    def _format(self, similar_tasks: list):
+        """Format the similar tasks"""
+        llm = LLM()
+        prompt = self.warehouse.get_prompt('format_str')
+        prompt = f"{prompt}\n\nSimilar Tasks: \n\n{similar_tasks}"
+        response = llm.formatted(prompt, FormatResponse)
+        return response.similar_tasks
 
-    def _log_similar_tasks(self, similar_tasks: list):
-        """Log detailed information about each similar task"""
+    def _log_similar_tasks(self, similar_tasks):
+        """Log detailed information about similar tasks (now formatted as string)"""
         if not similar_tasks:
             self.logger.info("📝 No similar tasks found")
             return
         
-        self.logger.info(f"📝 === SIMILAR TASKS DETAILS ===")
-        for i, task in enumerate(similar_tasks, 1):
-            self.logger.info(f"📝 Task {i}:")
-            self.logger.info(f"   └─ ID: {task.get('TaskID', 'N/A')}")
-            self.logger.info(f"   └─ Description: {task.get('TaskDescription', 'N/A')}")
-            self.logger.info(f"   └─ Tools Used: {task.get('ToolsUsed', 'N/A')}")
-            self.logger.info(f"   └─ Performance Score: {task.get('PerformanceScore', 'N/A')}")
-            self.logger.info(f"   └─ Reflection Steps: {task.get('ReflectionSteps', 'N/A')}")
-            self.logger.info(f"   └─ AI Description: {task.get('AIDescription', 'N/A')}")
-            
-            # Log details if present
-            if 'Details' in task and task['Details']:
-                details = task['Details'][:200] + "..." if len(task['Details']) > 200 else task['Details']
-                self.logger.info(f"   └─ Details: {details}")
+        self.logger.info(f"📝 === FORMATTED SIMILAR TASKS ===")
+        # Log the formatted string response
+        for line in similar_tasks.split('\n'):
+            if line.strip():  # Only log non-empty lines
+                self.logger.info(f"📝 {line}")
         
         self.logger.info(f"📝 === END SIMILAR TASKS ===")
 
     def sync_logs(self):
         """Force upload current log file to S3"""
-        if self.log_manager:
-            try:
-                self.logger.info("☁️ Force uploading current log to S3...")
-                
-                # Flush all handlers to ensure log is written
-                for handler in self.logger.handlers:
-                    if hasattr(handler, 'flush'):
-                        handler.flush()
-                
-                time.sleep(0.1)
-                
-                # Get current log file name
-                current_log_filename = None
-                for handler in self.logger.handlers:
-                    if isinstance(handler, logging.FileHandler):
-                        current_log_filename = os.path.basename(handler.baseFilename)
-                        break
-                
-                if current_log_filename:
-                    success = self.log_manager.force_upload_current_log(current_log_filename)
-                    if success:
-                        print(f"✅ Current log file uploaded successfully: {current_log_filename}")
-                    else:
-                        print(f"❌ Failed to upload current log file: {current_log_filename}")
-                else:
-                    print("⚠️ Could not determine current log file name")
-                    
-            except Exception as e:
-                print(f"❌ Log upload failed: {e}")
+        return sync_logs_to_s3(self.logger, self.log_manager, force_current=True)
 
 # if __name__ == "__main__":
 #     print("🧪 Testing STR with Orchestration Configuration...")
     
 #     try:
-#         str_component = STR()
+#         str_component = STR(user_email="amir@m3labs.co.uk")
         
 #         # Test the knowledge base query
 #         result = str_component.query_knowledge_base("build rest api to retrueve customer data from mysql instance erret123")
