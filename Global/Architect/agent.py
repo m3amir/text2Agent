@@ -174,8 +174,9 @@ class Architect:
         llm = LLM()
         prompt = (
             "Design a LangGraph based on these components. Return JSON under 'graph_skeleton' "
-            "describing nodes (function, inputs), edges, and conditional routing.\n\nComponents:\n"
+            "describing nodes (function, inputs), edges, and conditional routing.\n\nComponents:\n",
             f"{state['draft_workflow']}"
+            "Ensure that you are using the appropriate inputs for each tool you have access to"
         )
         response = llm.formatted(prompt, WorkflowDraftResponse)
         state["draft_workflow"] = response.graph_skeleton  # Overwrite with skeleton
