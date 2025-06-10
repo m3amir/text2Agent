@@ -55,7 +55,7 @@ class WorkflowDraftResponse(BaseModel):
 class LangGraphCodeResponse(BaseModel):
     """Final Python code for the generated LangGraph workflow."""
 
-    code: str = Field(description="Complete, runnable Python source code")
+    code: list[dict] = Field(description="Complete, JSON mapping out the nodes and edges of the Agent")
 
 
 class FeedbackResponse(BaseModel):
@@ -71,7 +71,7 @@ class State(TypedDict):
     input: str                         # The user‑supplied goal or agent description
     tools: List[Dict[str, str]]        # List of tool dicts: {name, description}
     draft_workflow: Dict[str, Any]     # Intermediate design artefact from LLM
-    langgraph_code: str                # Final generated Python code
+    langgraph_architecture: str                # Final generated Python code
     feedback_questions: List[str]      # Questions the LLM wants the human to answer
     answered_questions: List[Dict[str, str]]  # Answers collected via interrupt
     reviewed: bool                     # Flag set to True once answers are received
@@ -90,11 +90,8 @@ and return a **single JSON object** that fully describes the workflow.
 Input
 ~~~~~
 1. `agent_goal` – a short description of what the agent should accomplish.
-2. A Python (or pseudo‑Python) snippet showing:
-   • the `State` schema (TypedDict or BaseModel)
-   • all `add_node`, `add_edge`, `add_conditional_edges`, or `Command`‑based
-     control‑flow calls
-   • helper router functions used in conditional edges.
+2. A JSON snippet showing:
+   • The tools and their uses
 
 Output
 ~~~~~~
@@ -116,7 +113,7 @@ Return **only** valid JSON with these top‑level keys:
 ```
 Style rules
 ~~~~~~~~~~~
-* **JSON only** – no extra keys, comments, or prose.
+* **JSON output format only** – no extra keys, comments, or prose.
 * Use snake_case for all keys.
 * Keep every string ≤ 120 characters.
 * Do not include the backticks shown in the examples.
@@ -185,15 +182,15 @@ class Architect:
         return state
 
     async def generate_config(self, state: State) -> State:
-        """Ask the LLM to produce runnable Python code for the designed LangGraph."""
+        """Ask the LLM to produce a JSON for the designed LangGraph."""
         llm = LLM()
         prompt = (
             "Convert the following LangGraph design spec into a JSON format.\n"
-            "It must import all necessary modules and compile without modification.\n\n"
+            "It must import all necessary nodes and edges and compile without modification.\n\n"
             f"Spec:\n{state['draft_workflow']}"
         )
         response = llm.formatted(prompt, LangGraphCodeResponse)
-        state["langgraph_code"] = response.code  # Save code for final output
+        state["langgraph_architecture"] = response.code  # Save code for final output
         return state
 
     # def human_approval(self, state: State) -> State:
@@ -299,5 +296,4 @@ if __name__ == "__main__":
     result = asyncio.run(graph.ainvoke(initial_state, config=config))
 
     # Pretty‑print the generated LangGraph Python code
-    print("\n──────────── Generated LangGraph Code ────────────\n")
-    print(result["langgraph_code"])
+    print(result["langgraph_architecture"])
