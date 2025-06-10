@@ -37,7 +37,7 @@ class feedbackResponse(BaseModel):
 
 class toolsResponse(BaseModel):
     """Always use this tool to structure your response to the user."""
-    tools: dict = Field(description="Dictionary with connector names as keys and lists of selected tool names as values, e.g. {'connector1': ['tool1', 'tool2'], 'connector2': ['tool3']}")
+    tools: dict = Field(description="Dictionary with connector names as keys and dictionaries of selected tools as values. Each tool should include both name and description, e.g. {'connector1': {'tool1': 'description1', 'tool2': 'description2'}, 'connector2': {'tool3': 'description3'}}")
 
 class State(TypedDict):
     input: str
@@ -123,7 +123,6 @@ class Collector:
         state['connector_tools'] = self.load_connector_tools(valid_connectors)
         tools = self.format_tools(state['connector_tools'])
         prompt = self.warehouse.get_prompt('tools') + "\n\n" + "User Agent Description: " + state['input'] + "\n\n" + "Available Tools: " + tools
-        print("prompt", prompt)
         chosen_tools = llm.formatted(prompt, toolsResponse)
         print("chosen_tools", chosen_tools)
         return state

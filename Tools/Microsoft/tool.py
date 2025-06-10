@@ -62,6 +62,25 @@ class MicrosoftToolkit:
     def microsoft_mail_send_email_as_user(self, sender_email: str, recipients: List[str], subject: str, body: str,
                                body_type: str = "HTML", cc_emails: List[str] = None, bcc_emails: List[str] = None,
                                attachments: List[Dict] = None) -> str:
+        """
+        Send an email through Microsoft Graph API on behalf of a specified user.
+        
+        This tool automatically formats plain text into beautiful HTML using AI if the body_type is HTML.
+        It handles authentication, email composition, and delivery through Microsoft 365.
+        
+        Args:
+            sender_email (str): Email address of the user sending the email
+            recipients (List[str]): List of recipient email addresses
+            subject (str): Subject line of the email
+            body (str): Email body content (plain text or HTML)
+            body_type (str, optional): Content type - "HTML" or "Text". Defaults to "HTML"
+            cc_emails (List[str], optional): List of CC email addresses
+            bcc_emails (List[str], optional): List of BCC email addresses
+            attachments (List[Dict], optional): List of attachment objects
+            
+        Returns:
+            str: JSON string with success status and email details or error information
+        """
         return asyncio.run(self._send_email_as_user_async(sender_email, recipients, subject, body, body_type, cc_emails, bcc_emails, attachments))
     
     async def _send_email_as_user_async(self, sender_email: str, recipients: List[str], subject: str, body: str,
@@ -143,6 +162,25 @@ class MicrosoftToolkit:
     def microsoft_calendar_create_event(self, user_email: str, subject: str, start_time: str, end_time: str, 
                             location: str = "", body: str = "", attendees: List[str] = None, 
                             create_teams_meeting: bool = False) -> str:
+        """
+        Create a calendar event in Microsoft Outlook calendar for a specified user.
+        
+        This tool creates calendar events with support for Teams meetings, attendees, and location details.
+        It integrates with Microsoft Graph API to schedule meetings and send invitations.
+        
+        Args:
+            user_email (str): Email address of the user whose calendar to create the event in
+            subject (str): Title/subject of the calendar event
+            start_time (str): Start date and time in ISO format (e.g., "2024-01-15T10:00:00")
+            end_time (str): End date and time in ISO format (e.g., "2024-01-15T11:00:00")
+            location (str, optional): Meeting location or room name
+            body (str, optional): Event description or agenda
+            attendees (List[str], optional): List of attendee email addresses
+            create_teams_meeting (bool, optional): Whether to create a Teams online meeting. Defaults to False
+            
+        Returns:
+            str: JSON string with event details including ID, web link, and Teams join URL (if applicable)
+        """
         return asyncio.run(self._create_event_async(user_email, subject, start_time, end_time, location, body, attendees, create_teams_meeting))
     
     async def _create_event_async(self, user_email: str, subject: str, start_time: str, end_time: str,
@@ -195,6 +233,23 @@ class MicrosoftToolkit:
             return json.dumps({"error": f"Exception: {str(e)}", "success": False})
     
     def microsoft_calendar_list_events(self, user_email: str, start_date: str = None, end_date: str = None, limit: int = 10) -> str:
+        """
+        Retrieve and list calendar events from a user's Microsoft Outlook calendar.
+        
+        This tool fetches calendar events within a specified date range, providing details about
+        meetings, appointments, and scheduled activities. Useful for checking availability and 
+        viewing upcoming events.
+        
+        Args:
+            user_email (str): Email address of the user whose calendar events to retrieve
+            start_date (str, optional): Start date filter in ISO format (e.g., "2024-01-15T00:00:00")
+            end_date (str, optional): End date filter in ISO format (e.g., "2024-01-20T23:59:59")
+            limit (int, optional): Maximum number of events to return. Defaults to 10
+            
+        Returns:
+            str: JSON string with list of events including details like subject, time, location, 
+                 attendees, organizer, and web links
+        """
         return asyncio.run(self._list_events_async(user_email, start_date, end_date, limit))
     
     async def _list_events_async(self, user_email: str, start_date: str = None, end_date: str = None, limit: int = 10) -> str:
@@ -239,6 +294,20 @@ class MicrosoftToolkit:
             return json.dumps({'error': f"Exception: {str(e)}", 'success': False})
     
     def microsoft_calendar_delete_event(self, user_email: str, event_id: str) -> str:
+        """
+        Delete a specific calendar event from a user's Microsoft Outlook calendar.
+        
+        This tool permanently removes a calendar event using its unique event ID. Use with caution
+        as deleted events cannot be recovered. Useful for canceling meetings or removing outdated
+        appointments.
+        
+        Args:
+            user_email (str): Email address of the user whose calendar event to delete
+            event_id (str): Unique identifier of the event to delete (obtained from list_events)
+            
+        Returns:
+            str: JSON string confirming successful deletion or error information
+        """
         return asyncio.run(self._delete_event_async(user_email, event_id))
     
     async def _delete_event_async(self, user_email: str, event_id: str) -> str:
@@ -301,6 +370,22 @@ class MicrosoftToolkit:
             return []
     
     def microsoft_sharepoint_search_files(self, query: str, drive_name: str = "Documents", file_type: str = None) -> str:
+        """
+        Search for files in Microsoft SharePoint document libraries using keyword queries.
+        
+        This tool searches through SharePoint sites and document libraries to find files matching
+        your search criteria. It can filter by file type and search within specific drives/libraries.
+        Returns detailed file information including download URLs and metadata.
+        
+        Args:
+            query (str): Search keywords or terms to find in file names and content
+            drive_name (str, optional): Name of the SharePoint drive/library to search. Defaults to "Documents"
+            file_type (str, optional): File extension to filter results (e.g., "pdf", "docx", "xlsx")
+            
+        Returns:
+            str: JSON string with matching files including name, path, size, creation date, 
+                 modification date, download URL, web URL, and MIME type
+        """
         return asyncio.run(self._search_files_async(query, drive_name, file_type))
     
     async def _search_files_async(self, query: str, drive_name: str = "Documents", file_type: str = None) -> str:
@@ -344,6 +429,22 @@ class MicrosoftToolkit:
             return json.dumps({'error': f"Exception: {str(e)}"})
     
     def microsoft_sharepoint_download_and_extract_text(self, file_id: str, drive_name: str = "Documents") -> str:
+        """
+        Download a file from SharePoint and extract its text content for analysis.
+        
+        This tool downloads files from SharePoint and extracts readable text from various formats
+        including Word documents (.docx), PDFs (.pdf), and plain text files (.txt). Perfect for
+        content analysis, document processing, and information extraction workflows.
+        
+        Args:
+            file_id (str): Unique identifier of the file to download (obtained from search_files)
+            drive_name (str, optional): Name of the SharePoint drive/library containing the file. 
+                                      Defaults to "Documents"
+            
+        Returns:
+            str: JSON string with extracted text content, file metadata, extraction method used,
+                 and a preview of the content. Supports .docx, .pdf, and .txt files
+        """
         return asyncio.run(self._download_and_extract_text_async(file_id, drive_name))
     
     async def _download_and_extract_text_async(self, file_id: str, drive_name: str = "Documents") -> str:

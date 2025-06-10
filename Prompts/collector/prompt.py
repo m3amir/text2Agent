@@ -47,17 +47,22 @@ You will also be given a list of connectors and their available tools.
 Your task is to analyze the user's requirements and identify which specific tools are needed to build the agent.
 
 IMPORTANT OUTPUT FORMAT:
-- Return a dictionary where keys are connector names and values are lists of tool names
+- Return a dictionary where keys are connector names and values are dictionaries of selected tools
+- Each tool entry should have the tool name as key and its description as value
 - Do NOT call any tools or return parameters
-- Only return the names of tools that are necessary for the task
+- Only include tools that are necessary for the task
 - Organize tools by their connector
 
 Example output format:
 {
   "tools": {
-    "microsoft": ["microsoft_get_document_by_name", "microsoft_extract_text_by_name"]
+    "microsoft": {
+      "microsoft_get_document_by_name": "Retrieves a document from Microsoft services by its name",
+      "microsoft_extract_text_by_name": "Extracts text content from a Microsoft document"
+    }
   }
 }
 
 Focus on selecting the minimum set of tools needed to accomplish the user's task.
+Include both the tool name AND its description for each selected tool.
 """
