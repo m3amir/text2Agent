@@ -13,6 +13,7 @@ from Global.llm import LLM
 try:
     import docx2txt
     from PyPDF2 import PdfReader
+    import openpyxl
     EXTRACTION_AVAILABLE = True
 except ImportError:
     EXTRACTION_AVAILABLE = False
@@ -30,6 +31,20 @@ class MicrosoftToolkit:
         
         if not all([self.tenant_id, self.client_id, self.client_secret]):
             raise ValueError("Missing required credentials: tenant_id, client_id, client_secret")
+    
+    def _run_async_safe(self, coro):
+        """Safely run async code whether or not we're already in an async context."""
+        try:
+            # Check if we're already in an async context
+            loop = asyncio.get_running_loop()
+            # If we get here, we're in an async context - run in thread
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(asyncio.run, coro)
+                return future.result()
+        except RuntimeError:
+            # No running loop, safe to use asyncio.run()
+            return asyncio.run(coro)
     
     async def _authenticate(self):
         if self.access_token:
@@ -81,7 +96,7 @@ class MicrosoftToolkit:
         Returns:
             str: JSON string with success status and email details or error information
         """
-        return asyncio.run(self._send_email_as_user_async(sender_email, recipients, subject, body, body_type, cc_emails, bcc_emails, attachments))
+        return self._run_async_safe(self._send_email_as_user_async(sender_email, recipients, subject, body, body_type, cc_emails, bcc_emails, attachments))
     
     async def _send_email_as_user_async(self, sender_email: str, recipients: List[str], subject: str, body: str,
                                        body_type: str = "HTML", cc_emails: List[str] = None, bcc_emails: List[str] = None,
@@ -181,7 +196,7 @@ class MicrosoftToolkit:
         Returns:
             str: JSON string with event details including ID, web link, and Teams join URL (if applicable)
         """
-        return asyncio.run(self._create_event_async(user_email, subject, start_time, end_time, location, body, attendees, create_teams_meeting))
+        return self._run_async_safe(self._create_event_async(user_email, subject, start_time, end_time, location, body, attendees, create_teams_meeting))
     
     async def _create_event_async(self, user_email: str, subject: str, start_time: str, end_time: str,
                                 location: str = "", body: str = "", attendees: List[str] = None, 
@@ -250,7 +265,7 @@ class MicrosoftToolkit:
             str: JSON string with list of events including details like subject, time, location, 
                  attendees, organizer, and web links
         """
-        return asyncio.run(self._list_events_async(user_email, start_date, end_date, limit))
+        return self._run_async_safe(self._list_events_async(user_email, start_date, end_date, limit))
     
     async def _list_events_async(self, user_email: str, start_date: str = None, end_date: str = None, limit: int = 10) -> str:
         try:
@@ -308,7 +323,7 @@ class MicrosoftToolkit:
         Returns:
             str: JSON string confirming successful deletion or error information
         """
-        return asyncio.run(self._delete_event_async(user_email, event_id))
+        return self._run_async_safe(self._delete_event_async(user_email, event_id))
     
     async def _delete_event_async(self, user_email: str, event_id: str) -> str:
         try:
@@ -386,7 +401,7 @@ class MicrosoftToolkit:
             str: JSON string with matching files including name, path, size, creation date, 
                  modification date, download URL, web URL, and MIME type
         """
-        return asyncio.run(self._search_files_async(query, drive_name, file_type))
+        return self._run_async_safe(self._search_files_async(query, drive_name, file_type))
     
     async def _search_files_async(self, query: str, drive_name: str = "Documents", file_type: str = None) -> str:
         try:
@@ -433,8 +448,8 @@ class MicrosoftToolkit:
         Download a file from SharePoint and extract its text content for analysis.
         
         This tool downloads files from SharePoint and extracts readable text from various formats
-        including Word documents (.docx), PDFs (.pdf), and plain text files (.txt). Perfect for
-        content analysis, document processing, and information extraction workflows.
+        including Word documents (.docx), PDFs (.pdf), Excel spreadsheets (.xlsx), and plain text files (.txt). 
+        Perfect for content analysis, document processing, and information extraction workflows.
         
         Args:
             file_id (str): Unique identifier of the file to download (obtained from search_files)
@@ -443,9 +458,9 @@ class MicrosoftToolkit:
             
         Returns:
             str: JSON string with extracted text content, file metadata, extraction method used,
-                 and a preview of the content. Supports .docx, .pdf, and .txt files
+                 and a preview of the content. Supports .docx, .pdf, .xlsx, and .txt files
         """
-        return asyncio.run(self._download_and_extract_text_async(file_id, drive_name))
+        return self._run_async_safe(self._download_and_extract_text_async(file_id, drive_name))
     
     async def _download_and_extract_text_async(self, file_id: str, drive_name: str = "Documents") -> str:
         try:
@@ -504,8 +519,29 @@ class MicrosoftToolkit:
                     extracted_text = response.content.decode('utf-8')
                     extraction_method = "plain text"
                     
+                elif file_name.endswith('.xlsx') or 'spreadsheetml' in mime_type:
+                    file_stream = io.BytesIO(response.content)
+                    workbook = openpyxl.load_workbook(file_stream)
+                    extracted_text = ""
+                    
+                    for sheet_name in workbook.sheetnames:
+                        worksheet = workbook[sheet_name]
+                        extracted_text += f"\n--- Sheet: {sheet_name} ---\n"
+                        
+                        for row in worksheet.iter_rows(values_only=True):
+                            row_text = []
+                            for cell in row:
+                                if cell is not None:
+                                    row_text.append(str(cell))
+                                else:
+                                    row_text.append("")
+                            if any(text.strip() for text in row_text):  # Skip empty rows
+                                extracted_text += "\t".join(row_text) + "\n"
+                    
+                    extraction_method = "openpyxl"
+                    
                 else:
-                    return json.dumps({'error': f"Unsupported file type: {file_name}", 'supported_types': ['.docx', '.pdf', '.txt'], 'success': False})
+                    return json.dumps({'error': f"Unsupported file type: {file_name}", 'supported_types': ['.docx', '.pdf', '.txt', '.xlsx'], 'success': False})
                 
                 extracted_text = extracted_text.strip()
                 

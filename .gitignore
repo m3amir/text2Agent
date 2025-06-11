@@ -11,6 +11,7 @@ logs/
 # Secret files with credentials (keep .example files)
 Connectors/.gdrive-server-credentials.json
 MCP/Config/config.json
+graph_images/
 # Note: .example files are included for reference
 
 # Environment files

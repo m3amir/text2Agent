@@ -24,3 +24,6 @@ authlib
 werkzeug
 requests
 reportlab
+docx2txt
+PyPDF2
+openpyxlc

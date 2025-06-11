@@ -8,7 +8,7 @@ import hashlib
 import hmac
 import base64
 import os
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 from botocore.exceptions import ClientError
 from dotenv import load_dotenv
 
@@ -20,6 +20,10 @@ COGNITO_REGION = os.getenv('COGNITO_REGION', 'eu-west-2')
 USER_POOL_ID = os.getenv('COGNITO_USER_POOL_ID', 'eu-west-2_MbS1w2AZW')
 CLIENT_ID = os.getenv('COGNITO_CLIENT_ID', '399p06atd6g2lu57h3kt0lgog8')
 CLIENT_SECRET = os.getenv('COGNITO_CLIENT_SECRET')
+
+# User tier constants
+VALID_USER_TIERS = ['standard', 'premium']
+DEFAULT_USER_TIER = 'standard'
 
 class CognitoAuth:
     """Simple Cognito authentication manager"""
@@ -45,16 +49,42 @@ class CognitoAuth:
         ).digest()
         return base64.b64encode(dig).decode()
     
-    def sign_up(self, username: str, email: str, password: str) -> Dict:
-        """Register a new user"""
+    def _validate_user_tier(self, user_tier: str) -> str:
+        """Validate and normalize user tier"""
+        if not user_tier or user_tier.lower() not in VALID_USER_TIERS:
+            return DEFAULT_USER_TIER
+        return user_tier.lower()
+    
+    def _handle_cognito_error(self, e: ClientError) -> Dict:
+        """Handle Cognito client errors consistently"""
+        return {
+            'success': False,
+            'error': e.response['Error']['Code'],
+            'message': e.response['Error']['Message']
+        }
+    
+    def sign_up(self, username: str, email: str, password: str, user_tier: str = None, 
+                custom_attributes: Optional[Dict[str, str]] = None) -> Dict:
+        """Register a new user with custom attributes including user_tier"""
         try:
+            validated_tier = self._validate_user_tier(user_tier)
+            
+            user_attributes = [
+                {'Name': 'email', 'Value': email},
+                {'Name': 'custom:user_tier', 'Value': validated_tier}
+            ]
+            
+            if custom_attributes:
+                for attr_name, attr_value in custom_attributes.items():
+                    if not attr_name.startswith('custom:') and attr_name not in ['email', 'phone_number', 'given_name', 'family_name']:
+                        attr_name = f'custom:{attr_name}'
+                    user_attributes.append({'Name': attr_name, 'Value': str(attr_value)})
+            
             params = {
                 'ClientId': self.client_id,
                 'Username': username,
                 'Password': password,
-                'UserAttributes': [
-                    {'Name': 'email', 'Value': email}
-                ]
+                'UserAttributes': user_attributes
             }
             
             if self.client_secret:
@@ -68,15 +98,59 @@ class CognitoAuth:
                 'user_sub': response['UserSub'],
                 'username': username,
                 'email': email,
+                'user_tier': validated_tier,
                 'confirmation_required': not response.get('UserConfirmed', False)
             }
             
         except ClientError as e:
+            return self._handle_cognito_error(e)
+    
+    def update_user_tier(self, username: str, new_tier: str) -> Dict:
+        """Update user's tier (requires admin privileges)"""
+        try:
+            validated_tier = self._validate_user_tier(new_tier)
+            
+            self.client.admin_update_user_attributes(
+                UserPoolId=self.user_pool_id,
+                Username=username,
+                UserAttributes=[
+                    {'Name': 'custom:user_tier', 'Value': validated_tier}
+                ]
+            )
+            
             return {
-                'success': False,
-                'error': e.response['Error']['Code'],
-                'message': e.response['Error']['Message']
+                'success': True,
+                'message': f'User tier updated to {validated_tier}',
+                'username': username,
+                'new_tier': validated_tier
             }
+            
+        except ClientError as e:
+            return self._handle_cognito_error(e)
+    
+    def get_user_attributes(self, username: str) -> Dict:
+        """Get user attributes including user_tier"""
+        try:
+            response = self.client.admin_get_user(
+                UserPoolId=self.user_pool_id,
+                Username=username
+            )
+            
+            attributes = {}
+            for attr in response.get('UserAttributes', []):
+                attributes[attr['Name']] = attr['Value']
+            
+            return {
+                'success': True,
+                'username': username,
+                'attributes': attributes,
+                'user_tier': attributes.get('custom:user_tier', DEFAULT_USER_TIER),
+                'email': attributes.get('email', ''),
+                'user_status': response.get('UserStatus', 'UNKNOWN')
+            }
+            
+        except ClientError as e:
+            return self._handle_cognito_error(e)
     
     def confirm_sign_up(self, username: str, confirmation_code: str) -> Dict:
         """Confirm user registration with verification code"""
@@ -99,11 +173,7 @@ class CognitoAuth:
             }
             
         except ClientError as e:
-            return {
-                'success': False,
-                'error': e.response['Error']['Code'],
-                'message': e.response['Error']['Message']
-            }
+            return self._handle_cognito_error(e)
     
     def sign_in(self, username: str, password: str) -> Dict:
         """Sign in user and get tokens"""
@@ -130,11 +200,7 @@ class CognitoAuth:
             }
             
         except ClientError as e:
-            return {
-                'success': False,
-                'error': e.response['Error']['Code'],
-                'message': e.response['Error']['Message']
-            }
+            return self._handle_cognito_error(e)
     
     def resend_confirmation_code(self, username: str) -> Dict:
         """Resend confirmation code"""
@@ -155,24 +221,4 @@ class CognitoAuth:
             }
             
         except ClientError as e:
-            return {
-                'success': False,
-                'error': e.response['Error']['Code'],
-                'message': e.response['Error']['Message']
-            }
-
-# Convenience functions
-def register_user(username: str, email: str, password: str) -> Dict:
-    """Quick user registration"""
-    auth = CognitoAuth()
-    return auth.sign_up(username, email, password)
-
-def confirm_user(username: str, confirmation_code: str) -> Dict:
-    """Quick user confirmation"""
-    auth = CognitoAuth()
-    return auth.confirm_sign_up(username, confirmation_code)
-
-def login_user(username: str, password: str) -> Dict:
-    """Quick user login"""
-    auth = CognitoAuth()
-    return auth.sign_in(username, password) 
+            return self._handle_cognito_error(e) 

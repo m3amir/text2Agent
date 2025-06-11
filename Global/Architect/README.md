@@ -1,199 +1,224 @@
-# Skeleton Graph Builder
+# Skeleton Workflow System
 
-A simple, clean utility for creating LangGraph workflows from blueprint configurations.
+A simplified, efficient workflow system for executing tools with AI analysis using LangGraph.
 
 ## Overview
 
-The `Skeleton` class automatically builds LangGraph workflows from simple blueprint dictionaries containing nodes and edges. It handles all the boilerplate of creating nodes, adding edges, and setting up proper START/END connections.
+The `Skeleton` class creates streamlined workflows that execute tools, analyze results with AI colleagues, and generate visualizations. Simplified from 449 lines to 230 lines while maintaining all core functionality.
 
 ## Features
 
-✅ **Simple Blueprint Input** - Define your workflow with just nodes and edges  
-✅ **Automatic START/END Handling** - No need to manually wire entry/exit points  
-✅ **Duplicate Node Prevention** - Safely handles blueprint duplicates  
-✅ **Clean Logging** - Track workflow creation with detailed logs  
-✅ **Minimal Code** - Focus on workflow logic, not LangGraph boilerplate  
+✅ **Tool Execution** - Seamless MCP tool integration and execution  
+✅ **AI Colleagues Analysis** - Automated analysis and scoring of tool results  
+✅ **Linear Workflow** - Simple tool1 → colleagues → finish flow  
+✅ **PNG Visualization** - Automatic workflow diagram generation  
+✅ **Real Tool Results** - Executes actual tools with real data  
+✅ **Clean Logging** - Comprehensive S3 logging and tracking  
+✅ **Minimal Code** - 50% smaller codebase, easier to maintain  
 
 ## Requirements
 
 - Python 3.8+
 - LangGraph
-- Custom logging utilities (`utils.core`, `Logs.log_manager`)
+- MCP tool support
+- Custom logging utilities
+- Colleague analysis system
 
 ## Quick Start
 
 ```python
-from skeleton import Skeleton
+from Global.Architect.skeleton import run_skeleton
 
-# Define your workflow blueprint
+# Blueprint-based execution
 blueprint = {
-    "nodes": ['Start', 'Process', 'Review', 'Finish'],
-    "edges": [
-        ('Start', 'Process'),
-        ('Process', 'Review'), 
-        ('Review', 'Finish')
-    ]
+    "nodes": ['Microsoft', 'Colleagues', 'Email', 'finish'],
+    "edges": [('Microsoft', 'Colleagues')],
+    "conditional_edges": {
+        'Colleagues': {
+            'retry_previous': 'Microsoft',
+            'next_step': 'Email', 
+            'finish': 'finish'
+        }
+    },
+    "node_tools": {
+        'Microsoft': ['microsoft_sharepoint_search_files'],
+        'Email': ['microsoft_mail_send_email_as_user']
+    }
 }
 
-# Create and compile the workflow
-skeleton = Skeleton(user_email="user@example.com")
-skeleton.create_skeleton("My workflow task", blueprint)
-compiled_graph = skeleton.compile_graph()
+result, viz_files = await run_skeleton(
+    user_email="user@example.com",
+    blueprint=blueprint,
+    task_name="workflow"
+)
 
-# Your workflow is ready to use!
+print(f"Status: {result['status']}")
+print(f"Executed tools: {result['executed_tools']}")
+print(f"Colleagues score: {result['colleagues_score']}/10")
+print(f"Generated files: {viz_files}")
 ```
 
-## Blueprint Format
+## Workflow Structure
 
-The blueprint is a simple dictionary with two keys:
+The skeleton builds custom workflows from blueprints with conditional routing:
+
+```
+START → Microsoft → Colleagues → Email → finish → END
+                        ↓
+                   (conditional routing based on score)
+                        ↓
+            retry_previous / next_step / finish
+```
+
+1. **Tool Nodes**: Execute specified tools from node_tools
+2. **Colleagues**: AI analysis with conditional routing based on score
+3. **Conditional Edges**: Route to retry, proceed, or finish based on analysis
+
+## Real Example
 
 ```python
-blueprint = {
-    "nodes": [
-        "node1",      # List of node names (strings)
-        "node2", 
-        "node3"
-    ],
-    "edges": [
-        ("node1", "node2"),    # Tuples of (from_node, to_node)
-        ("node2", "node3")
-    ]
-}
+#!/usr/bin/env python3
+import asyncio
+from Global.Architect.skeleton import run_skeleton
+
+async def test_skeleton():
+    # Test with Microsoft tools
+    user_email = "amir@m3labs.co.uk"
+    tool_names = ['microsoft_sharepoint_search_files', 'microsoft_mail_send_email_as_user']
+    
+    result, viz_files = await run_skeleton(user_email, tool_names, "test_workflow")
+    
+    if result:
+        print(f"✅ Status: {result['status']}")
+        print(f"🔧 Executed: {result['executed_tools']}")
+        print(f"🤝 Analysis: {result['colleagues_analysis'][:100]}...")
+        print(f"🎯 Score: {result['colleagues_score']}/10")
+        print(f"📁 Files: {viz_files}")
+
+if __name__ == "__main__":
+    asyncio.run(test_skeleton())
 ```
 
-### Automatic Connections
+## Example Output
 
-The Skeleton automatically adds:
-- **START edge**: From `START` to the first node in your blueprint
-- **END edges**: From terminal nodes (nodes with no outgoing edges) to `END`
-
-## Example Workflow
-
-```python
-# Example: AI Agent Pipeline
-blueprint = {
-    "nodes": [
-        'STR',           # Strategic Thinking & Reasoning  
-        'Colleagues',    # Colleague Consultation
-        'Orchestration', # Task Orchestration
-        'Execution',     # Task Execution
-        'Review',        # Review Results
-        'Feedback',      # Gather Feedback
-        'Summary'        # Final Summary
-    ],
-    "edges": [
-        ('STR', 'Colleagues'),
-        ('Colleagues', 'Orchestration'),
-        ('Orchestration', 'Execution'),
-        ('Execution', 'Review'),
-        ('Review', 'Feedback'),
-        ('Feedback', 'Summary'),
-        ('Summary', 'Feedback'),  # Feedback loop
-    ]
-}
-
-skeleton = Skeleton(user_email="amir@m3labs.co.uk")
-skeleton.create_skeleton("Build REST API", blueprint)
-graph = skeleton.compile_graph()
-```
-
-This creates the flow:
-```
-START → STR → Colleagues → Orchestration → Execution → Review → Feedback → Summary
-                                                                    ↑         ↓
-                                                                    ← ← ← ← ← ←
+```bash
+🚀 Running skeleton with tools: ['microsoft_sharepoint_search_files', 'microsoft_mail_send_email_as_user']
+🔧 Tool node: Available tools: ['microsoft_sharepoint_search_files', 'microsoft_mail_send_email_as_user']
+🔧 Tool node: Selected tool: microsoft_sharepoint_search_files
+🔧 Tool result: {"success": true, "query": "leads", "files": [{"name": "lead.xlsx", ...}]}
+🔧 Added microsoft_sharepoint_search_files to executed tools
+✅ Skeleton execution completed!
+📊 Status: completed
+🔧 Executed tools: ['microsoft_sharepoint_search_files']
+🤝 Analysis: Both employees have demonstrated a high level of proficiency...
+🎯 Score: 9/10
+📁 Generated files: ['graph_images/test_workflow_20250610_231529.png']
 ```
 
 ## API Reference
 
+### `run_skeleton(user_email, blueprint, task_name="workflow")`
+Main function to execute a skeleton workflow from blueprint.
+
+**Parameters:**
+- `user_email` (str): User email for logging
+- `blueprint` (Dict[str, Any]): Blueprint defining nodes, edges, node_tools, and conditional_edges
+- `task_name` (str): Name for the workflow task
+
+**Returns:**
+- `result` (dict): Workflow execution results with status, executed_tools, colleagues_analysis, etc.
+- `viz_files` (List[str]): Paths to generated PNG visualization files
+
 ### `Skeleton(user_email="")`
-Initialize a new skeleton builder.
+Core skeleton class for advanced usage.
 
-**Parameters:**
-- `user_email` (str): User email for logging purposes
+**Key Methods:**
+- `load_tools(tool_names)`: Load MCP tools by name
+- `create_skeleton(task, tool_names)`: Build the workflow graph  
+- `compile_and_visualize(task_name)`: Compile and generate PNG
+- `cleanup_tools()`: Clean up MCP session
 
-### `create_skeleton(task, blueprint)`
-Build a workflow from a blueprint.
+## State Schema
 
-**Parameters:**
-- `task` (str): Description of the task/workflow
-- `blueprint` (dict): Dictionary with 'nodes' and 'edges' keys
-
-**Returns:**
-- `StateGraph`: The constructed workflow (pre-compilation)
-
-### `compile_graph()`
-Compile the workflow into an executable graph.
-
-**Returns:**
-- `CompiledGraph`: Ready-to-execute LangGraph
+```python
+class WorkflowState(TypedDict, total=False):
+    messages: List[Any]                    # Workflow messages
+    executed_tools: List[str]              # Tools that have been executed
+    tool_execution_results: List[Dict]     # Detailed tool results
+    colleagues_analysis: str               # AI analysis of execution
+    colleagues_score: int                  # Quality score (0-10)
+    status: str                           # Workflow status
+```
 
 ## File Structure
 
 ```
 Global/Architect/
-├── skeleton.py          # Main Skeleton class
+├── skeleton.py          # Main Skeleton class (230 lines)
 ├── README.md           # This file
-└── graph_images/       # Generated graph visualizations (if created)
+└── graph_images/       # Auto-generated PNG visualizations
 ```
 
-## Logging
+## Tool Integration
 
-The Skeleton automatically logs:
-- Node creation
-- Edge addition  
-- START/END connections
-- Compilation status
-- Workflow completion
+The skeleton automatically:
+- Loads MCP tools by name
+- Binds tools to LLM with specific prompts
+- Executes tools with generated arguments
+- Captures real tool results
+- Handles both sync and async tool execution
 
-Logs are saved to: `Logs/{session_id}/{user_email}/ai_skeleton_{timestamp}.log`
+## AI Colleagues Analysis
+
+After tool execution:
+- Analyzes tool results for quality and effectiveness
+- Provides detailed written analysis
+- Assigns numerical scores (0-10)
+- Logs analysis to S3 for tracking
+
+## Simplifications Made
+
+**Removed (from 449 → 230 lines):**
+- Complex configuration system
+- Verbose debug output  
+- Complex routing/conditional edges
+- Redundant state fields
+- Blueprint parsing complexity
+
+**Kept:**
+- Core tool execution
+- Colleagues AI analysis
+- PNG visualization
+- Error handling
+- S3 logging
+- All essential features
 
 ## Error Handling
 
-The class gracefully handles:
-- Duplicate nodes (skips with logging)
-- Missing START connections (auto-added)
-- Missing END connections (auto-added)
-- Compilation errors (logged and re-raised)
+The system gracefully handles:
+- Tool execution failures
+- MCP session errors
+- Colleagues analysis failures
+- PNG generation issues
+- Missing tools
 
-## Advanced Usage
+## Logging
 
-### Custom Node Functions
+Comprehensive logging includes:
+- Tool loading and execution
+- LLM interactions
+- Colleagues analysis
+- S3 sync operations
+- Error tracking
 
-By default, nodes use placeholder functions. To customize:
-
-```python
-# Override the node function creation
-def my_custom_node(state):
-    # Your custom logic here
-    return modified_state
-
-# Replace the placeholder after creation
-skeleton.workflow.nodes['MyNode'] = my_custom_node
-```
-
-### Multiple Workflows
-
-```python
-# Create multiple workflows from different blueprints
-skeleton = Skeleton(user_email="user@example.com")
-
-# Workflow 1
-skeleton.create_skeleton("Task 1", blueprint1)
-graph1 = skeleton.compile_graph()
-
-# Reset for new workflow
-skeleton.workflow = StateGraph(MessagesState)
-skeleton.create_skeleton("Task 2", blueprint2) 
-graph2 = skeleton.compile_graph()
-```
+Logs saved to: `Logs/{session_id}/{user_email}/ai_skeleton_{timestamp}.log`
 
 ## Contributing
 
-1. Keep the code simple and focused
-2. Maintain comprehensive logging
-3. Handle edge cases gracefully
-4. Update this README for new features
+1. Keep the linear workflow simple
+2. Maintain tool execution functionality
+3. Preserve colleagues analysis integration
+4. Update README for changes
 
 ## License
 

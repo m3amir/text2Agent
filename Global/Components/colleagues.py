@@ -141,5 +141,5 @@ class Colleague:
                 self.level += 1
         
         finally:
-            # S3 sync using centralized function
-            sync_logs_to_s3(self.logger, self.log_manager, force_current=False)
+            # S3 sync - only current session to avoid massive log spam  
+            sync_logs_to_s3(self.logger, self.log_manager, force_current=True)
