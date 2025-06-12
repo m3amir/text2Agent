@@ -20,14 +20,20 @@ except ImportError:
 
 class MicrosoftToolkit:
     def __init__(self, credentials: Dict[str, str]):
+        print("🔥 MICROSOFT TOOL INIT CALLED!")
+        print("🔥 MICROSOFT TOOL INIT CALLED!")
+        print("🔥 MICROSOFT TOOL INIT CALLED!")
+        print("🔥 MICROSOFT TOOL INIT CALLED!")
+
         self.tenant_id = credentials.get('tenant_id')
         self.client_id = credentials.get('client_id') 
         self.client_secret = credentials.get('client_secret')
         self.site_url = credentials.get('site_url')
-        
+        self.email = credentials.get('email')
         self.access_token = None
         self.site_id = None
         self.drives = {}
+        
         
         if not all([self.tenant_id, self.client_id, self.client_secret]):
             raise ValueError("Missing required credentials: tenant_id, client_id, client_secret")
@@ -74,7 +80,7 @@ class MicrosoftToolkit:
         }
 
     # EMAIL OPERATIONS
-    def microsoft_mail_send_email_as_user(self, sender_email: str, recipients: List[str], subject: str, body: str,
+    def microsoft_mail_send_email_as_user(self, recipients: List[str], subject: str, body: str,
                                body_type: str = "HTML", cc_emails: List[str] = None, bcc_emails: List[str] = None,
                                attachments: List[Dict] = None) -> str:
         """
@@ -84,7 +90,6 @@ class MicrosoftToolkit:
         It handles authentication, email composition, and delivery through Microsoft 365.
         
         Args:
-            sender_email (str): Email address of the user sending the email
             recipients (List[str]): List of recipient email addresses
             subject (str): Subject line of the email
             body (str): Email body content (plain text or HTML)
@@ -96,7 +101,7 @@ class MicrosoftToolkit:
         Returns:
             str: JSON string with success status and email details or error information
         """
-        return self._run_async_safe(self._send_email_as_user_async(sender_email, recipients, subject, body, body_type, cc_emails, bcc_emails, attachments))
+        return self._run_async_safe(self._send_email_as_user_async(self.email, recipients, subject, body, body_type, cc_emails, bcc_emails, attachments))
     
     async def _send_email_as_user_async(self, sender_email: str, recipients: List[str], subject: str, body: str,
                                        body_type: str = "HTML", cc_emails: List[str] = None, bcc_emails: List[str] = None,
@@ -473,13 +478,59 @@ class MicrosoftToolkit:
             
             drive_id = self.drives.get(drive_name)
             if not drive_id:
-                return json.dumps({"error": f"Drive '{drive_name}' not found"})
+                return json.dumps({
+                    "error": f"Drive '{drive_name}' not found",
+                    "success": False,
+                    "available_drives": list(self.drives.keys()),
+                    "site_id": self.site_id,
+                    "troubleshooting": {
+                        "suggestions": [
+                            f"Use one of the available drives: {list(self.drives.keys())}",
+                            "Check SharePoint site permissions",
+                            "Verify the drive/library name is spelled correctly"
+                        ]
+                    }
+                })
             
             file_url = f"https://graph.microsoft.com/v1.0/sites/{self.site_id}/drives/{drive_id}/items/{file_id}"
             response = requests.get(file_url, headers=self._get_headers())
             
             if response.status_code != 200:
-                return json.dumps({'error': f"File lookup failed: {response.status_code}", 'success': False})
+                error_details = ""
+                try:
+                    error_response = response.json()
+                    error_details = error_response.get('error', {}).get('message', 'No error details available')
+                except:
+                    error_details = response.text[:200] if response.text else 'No response content'
+                
+                error_msg = f"File lookup failed with status {response.status_code}"
+                
+                if response.status_code == 404:
+                    error_msg += f". File not found - the file ID '{file_id}' may be invalid, the file may have been moved/deleted, or you may not have permission to access it in drive '{drive_name}'"
+                elif response.status_code == 403:
+                    error_msg += f". Access denied - insufficient permissions to access file '{file_id}' in drive '{drive_name}'"
+                elif response.status_code == 401:
+                    error_msg += ". Authentication failed - token may have expired or be invalid"
+                else:
+                    error_msg += f". Error details: {error_details}"
+                
+                return json.dumps({
+                    'error': error_msg,
+                    'success': False,
+                    'status_code': response.status_code,
+                    'file_id': file_id,
+                    'drive_name': drive_name,
+                    'drive_id': drive_id,
+                    'site_id': self.site_id,
+                    'troubleshooting': {
+                        'suggestions': [
+                            "Verify the file ID is correct using microsoft_sharepoint_search_files",
+                            "Check if the file exists and hasn't been moved or deleted",
+                            "Ensure you have proper permissions to access the file",
+                            "Confirm the drive_name parameter is correct"
+                        ]
+                    }
+                })
             
             file_data = response.json()
             download_url = file_data.get('@microsoft.graph.downloadUrl')
@@ -491,7 +542,28 @@ class MicrosoftToolkit:
             response = requests.get(download_url, headers={'Authorization': f'Bearer {self.access_token}'})
             
             if response.status_code != 200:
-                return json.dumps({'error': f"Failed to download file: {response.status_code}", 'success': False})
+                error_msg = f"Failed to download file with status {response.status_code}"
+                
+                if response.status_code == 404:
+                    error_msg += ". File not found at download URL - file may have been moved or deleted"
+                elif response.status_code == 403:
+                    error_msg += ". Access denied - insufficient permissions to download the file"
+                elif response.status_code == 401:
+                    error_msg += ". Authentication failed during download"
+                else:
+                    try:
+                        error_details = response.json().get('error', {}).get('message', 'No error details')
+                        error_msg += f". Error details: {error_details}"
+                    except:
+                        error_msg += f". Response: {response.text[:100]}"
+                
+                return json.dumps({
+                    'error': error_msg,
+                    'success': False,
+                    'status_code': response.status_code,
+                    'file_name': file_data.get('name'),
+                    'download_url_exists': bool(download_url)
+                })
             
             # Extract text based on file type
             file_name = file_data.get('name', '').lower()

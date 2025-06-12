@@ -23,8 +23,8 @@ logger = logging.getLogger(__name__)
 # AWS Configuration
 AWS_PROFILE = 'm3'
 AWS_REGION = 'eu-west-2'
-SECRET_NAME = 'rds!db-0534ea7e-2933-421d-96a0-c6d80af7fdc4'
-DB_HOST = 'text2agent-db.cluqugi4urqi.eu-west-2.rds.amazonaws.com'
+SECRET_NAME = 'rds!cluster-e7dab0b5-4fb4-45fd-b4d3-d27929b53458'
+DB_HOST = 'text2agenttenant-instance-1.cluqugi4urqi.eu-west-2.rds.amazonaws.com'
 DB_PORT = 5432
 DB_NAME = 'postgres'
 

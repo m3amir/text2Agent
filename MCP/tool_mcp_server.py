@@ -108,8 +108,12 @@ class UniversalToolServer:
                         methods_found += 1
                 
                 # Also check for tool class methods (legacy support)
-                tool_class = next((obj for name, obj in inspect.getmembers(module) 
-                                 if inspect.isclass(obj) and 'Tool' in name and name != 'Tool'), None)
+                print(f"🔍 Looking for tool classes in {tool_name} module...", file=sys.stderr)
+                all_classes = [(name, obj) for name, obj in inspect.getmembers(module) if inspect.isclass(obj)]
+                print(f"📋 Found classes: {[name for name, obj in all_classes]}", file=sys.stderr)
+                tool_classes = [(name, obj) for name, obj in all_classes if 'Tool' in name and name != 'Tool']
+                print(f"🎯 Tool classes: {[name for name, obj in tool_classes]}", file=sys.stderr)
+                tool_class = tool_classes[0][1] if tool_classes else None
                 
                 if tool_class:
                     class_methods = [name for name in dir(tool_class) 
@@ -134,8 +138,10 @@ class UniversalToolServer:
         """Create handler for tool method"""
         async def handler(arguments: Dict[str, Any]):
             try:
+                print(f"🔧 Instantiating {tool_class.__name__} for {method_name}", file=sys.stderr, flush=True)
                 credentials = self._get_credentials(tool_class.__name__)
                 instance = tool_class(credentials) if credentials else tool_class()
+                print(f"✅ {tool_class.__name__} instantiated, calling {method_name}", file=sys.stderr, flush=True)
                 result = getattr(instance, method_name)(**arguments)
                 
                 if inspect.iscoroutine(result):

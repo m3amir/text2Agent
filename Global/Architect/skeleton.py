@@ -6,28 +6,36 @@ from datetime import datetime
 from typing import Dict, List, Any, TypedDict
 from typing_extensions import Annotated
 import operator
+from functools import partial
+import json
 
 from langgraph.graph import END, StateGraph, START
 from langgraph.graph.message import add_messages
+from langgraph.types import interrupt
 from Logs.log_manager import LogManager
 from Global.Components.colleagues import Colleague
 from Global.llm import LLM
 from utils.core import setup_logging, sync_logs_to_s3
 
-# Workflow state - using only built-in reducers
+THRESHOLD_SCORE = 7
+
+def replace_value(existing, new):
+    return new
+
 class WorkflowState(TypedDict, total=False):
     messages: Annotated[List[Any], add_messages]
     executed_tools: Annotated[List[str], operator.add]
     tool_execution_results: Annotated[List[Dict[str, Any]], operator.add]
     colleagues_analysis: str
-    colleagues_score: int
+    colleagues_score: float
     status: str
     task: str
     route: str
-    current_node: Annotated[List[str], operator.add]
-    current_node_tools: Annotated[List[str], operator.add]
+    current_node: Annotated[str, replace_value]
+    current_node_tools: Annotated[str, replace_value]
+    tool_sequence_index: Annotated[int, replace_value]
+    approved_tools: Annotated[set, replace_value]
 
-# MCP tool loading
 try:
     from MCP.langchain_converter import get_mcp_tools_with_session
     MCP_AVAILABLE = True
@@ -42,9 +50,9 @@ class Skeleton:
         self.workflow = StateGraph(WorkflowState)
         self.available_tools = {}
         self._session_context = None
+        self.guarded = {'microsoft_mail_send_email_as_user', 'microsoft_send_email_as_user'}
 
     async def load_tools(self, tool_names: List[str]):
-        """Load MCP tools by name"""
         if not MCP_AVAILABLE:
             return
         
@@ -59,7 +67,6 @@ class Skeleton:
                     break
 
     async def cleanup_tools(self):
-        """Clean up MCP session"""
         if self._session_context:
             try:
                 await self._session_context.__aexit__(None, None, None)
@@ -69,229 +76,170 @@ class Skeleton:
                 self._session_context = None
 
     def colleagues_node(self, state):
-        """AI colleagues analysis of tool results"""
         tool_results = state.get('tool_execution_results', [])
-        
         if not tool_results:
-            return {
-                'colleagues_analysis': "No tool results to analyze",
-                'colleagues_score': 0
-            }
+            return {'colleagues_analysis': "No tool results", 'colleagues_score': 0}
         
-        # Build analysis text only for the latest result
-        latest_result = tool_results[-1]  # Get the most recent tool execution
-        tool_name = latest_result.get('tool', 'Unknown')
-        tool_args = latest_result.get('args', {})
-        tool_result = str(latest_result.get('result', ''))[:300]  # Truncate
-        
-        analysis_text = f"Tool Execution Analysis:\n--- {tool_name} ---\nArgs: {tool_args}\nResult: {tool_result}..."
+        latest_result = tool_results[-1]
+        analysis_text = f"Tool: {latest_result.get('tool')}\nArgs: {latest_result.get('args')}\nResult: {latest_result.get('result')}"
         
         try:
             colleague = Colleague(user_email=self.user_email, log_manager=self.log_manager)
             analysis_result = colleague.update_message([analysis_text])
-            
-            score = 0
-            if hasattr(colleague, 'reviews') and colleague.reviews:
-                score = colleague.reviews[-1].get('score', 0)
+            score = colleague.reviews[-1].get('score', 0) if colleague.reviews else 0
             
             return {
                 'colleagues_analysis': analysis_result,
-                'colleagues_score': score
+                'colleagues_score': score,
+                'route': self.colleagues_router_logic({**state, 'colleagues_score': score})
             }
             
-        except Exception as e:
-            return {
-                'colleagues_analysis': f"Analysis failed: {str(e)}",
-                'colleagues_score': 0
-            }
+        except Exception:
+            return {'colleagues_analysis': "Analysis failed", 'colleagues_score': 0, 'route': 'next_step'}
 
     def colleagues_router_logic(self, state):
-        """Conditional routing logic after colleagues analysis"""
-        executed_tools = state.get('executed_tools', [])
         colleagues_score = state.get('colleagues_score', 0)
-        current_node_tools = state.get('current_node_tools', [])
-        current_node = state.get('current_node', [])
-        current_node_name = current_node[-1] if current_node else ''
+        tool_sequence_index = state.get('tool_sequence_index', 0)
         
-        print(f"🔀 Colleagues Router: Current node: {current_node_name}")
-        print(f"🔀 Colleagues Router: Executed tools: {executed_tools}")
-        print(f"🔀 Colleagues Router: Available tools in node: {current_node_tools}")
-        print(f"🔀 Colleagues Router: Score: {colleagues_score}/10")
+        # Get current tools
+        current_node_tools = []
+        try:
+            current_node_tools = json.loads(state.get('current_node_tools', '[]'))
+        except:
+            pass
         
-        # Check if there are more tools to execute in current node
-        remaining_tools = [tool for tool in current_node_tools if tool not in executed_tools]
+        # Emergency stop for loops
+        executed_tools = state.get('executed_tools', [])
+        if executed_tools and executed_tools.count(executed_tools[-1]) >= 3:
+            result = 'next_tool' if tool_sequence_index < len(current_node_tools) - 1 else 'next_step'
+            return result
         
-        # Routing decisions based on colleagues analysis
-        if colleagues_score < 7:  # Low score - retry previous tool
-            route = 'retry_previous'
-            print(f"🔀 Router: Low score ({colleagues_score}/10) - retrying previous tool")
-        elif remaining_tools:  # More tools to execute in current node
-            route = 'retry_previous'  # Go back to same node to execute next tool
-            print(f"🔀 Router: More tools to execute ({remaining_tools}) - continuing in current node")
-        elif len(executed_tools) >= 2:  # All tools executed - proceed
-            route = 'next_step'
-            print(f"🔀 Router: All tools executed - proceeding to next step")
-        else:  # Single tool executed with good score - proceed
-            route = 'next_step'
-            print(f"🔀 Router: Good score ({colleagues_score}/10) - proceeding to next step")
+        # Check if we've completed all tools
+        if tool_sequence_index >= len(current_node_tools) - 1:
+            return 'next_step'
         
-        return route
+        # Check if the next tool has already been executed to prevent duplicates
+        if tool_sequence_index + 1 < len(current_node_tools):
+            next_tool_name = current_node_tools[tool_sequence_index + 1]
+            if executed_tools and executed_tools.count(next_tool_name) >= 1:
+                return 'next_step'
+        
+        has_next_tool = tool_sequence_index < len(current_node_tools) - 1
+        
+        if colleagues_score >= THRESHOLD_SCORE:
+            result = 'next_tool' if has_next_tool else 'next_step'
+            return result
+        else:
+            return 'retry_same'
 
-    def tool_node(self, tool_names: List[str], node_name: str = ""):
-        """Tool execution node"""
-        async def node_function(state):
-            if 'executed_tools' not in state:
-                state['executed_tools'] = []
-            
-            # Return new state values instead of modifying in place
-            new_state = {
-                'current_node_tools': tool_names,
-                'current_node': [node_name]
-            }
-            
-            # Get next unexecuted tool from this node
-            executed_tools = state.get('executed_tools', [])
-            tool_name = None
-            for name in tool_names:
-                if name in self.available_tools and name not in executed_tools:
-                    tool_name = name
-                    break
-            
-            print(f"🔧 Tool node ({node_name}): Available tools: {tool_names}")
-            print(f"🔧 Tool node ({node_name}): Already executed: {executed_tools}")
-            print(f"🔧 Tool node ({node_name}): Selected tool: {tool_name}")
-            
-            if not tool_name:
-                print("❌ No unexecuted tools found!")
-                return new_state
-            
-            # Execute tool with LLM
-            llm = LLM()
-            tool = self.available_tools[tool_name]
-            bound_model = llm.get_model().bind_tools([tool])
-            print(f"🔧 Toollllllllllllllllll: {tool}")
-            
-            # Better prompt to encourage tool usage with context from previous tool results
-            task = state.get('task', 'complete the requested task')
-            
-            # Include previous tool results as context
-            tool_results = state.get('tool_execution_results', [])
-            context = ""
-            if tool_results:
-                context = "\n\nPrevious tool results for context:\n"
-                for result in tool_results[-3:]:  # Show last 3 results
-                    context += f"- {result.get('tool', 'Unknown')} tool returned: {str(result.get('result', ''))[:500]}...\n"
-            
-            prompt = f"You must use the {tool_name} tool to help progress the below task\n\nTask: {task} You have the following information from the previous tool results: {context}\n\n."
-            print(f"🔧 Prompt: {prompt}")
-            try:
-                print(f"🔧 Invoking LLM with tool: {tool_name}")
-                response = bound_model.invoke(prompt)
-                print(f"🔧 LLM response type: {type(response)}")
-                print(f"🔧 Has tool_calls: {hasattr(response, 'tool_calls')}")
-                
-                if hasattr(response, 'tool_calls') and response.tool_calls:
-                    print(f"🔧 Tool calls found: {len(response.tool_calls)}")
-                    tool_call = response.tool_calls[0]
-                    tool_args = tool_call.get('args', {})
-                    print(f"🔧 Tool args: {tool_args}")
-                    
-                    # Execute tool
-                    tool_result = await self._execute_tool(tool_name, tool_args)
-                    print(f"🔧 Tool result: {tool_result}")
-                    
-                    # Add results to new_state (will be merged by reducer)
-                    new_state['tool_execution_results'] = [{
-                        'tool': tool_name,
-                        'args': tool_args,
-                        'result': tool_result
-                    }]
-                    
-                    # Add to executed tools (will be merged by reducer)
-                    new_state['executed_tools'] = [tool_name]
-                    print(f"🔧 Added {tool_name} to executed tools")
-                else:
-                    print("❌ No tool calls in LLM response")
-                    print(f"🔧 Response content: {response}")
-            
-            except Exception as e:
-                print(f"❌ Tool execution failed: {e}")
-                new_state['tool_execution_results'] = [{
-                    'tool': tool_name,
-                    'error': str(e)
-                }]
-                new_state['executed_tools'] = [tool_name]
-            
-            return new_state
+    async def tool_node_execute(self, state, tool_names: List[str], node_name: str = ""):
+        new_state = {
+            'current_node_tools': json.dumps(tool_names),
+            'current_node': node_name
+        }
         
-        return node_function
+        # Determine which tool to execute
+        route = state.get('route', '')
+        tool_sequence_index = state.get('tool_sequence_index', 0)
+        
+        if 'tool_sequence_index' not in state:
+            new_state['tool_sequence_index'] = 0
+            tool_sequence_index = 0
+        
+        if route == 'next_tool':
+            tool_sequence_index += 1
+            new_state['tool_sequence_index'] = tool_sequence_index
+        
+        # Get tool name
+        tool_name = tool_names[tool_sequence_index] if tool_sequence_index < len(tool_names) else None
+        
+        if not tool_name or tool_name not in self.available_tools:
+            tool_name = next((name for name in tool_names if name in self.available_tools), None)
+        
+        if not tool_name:
+            return new_state
+
+        # Generate tool arguments
+        llm = LLM()
+        tool = self.available_tools[tool_name]
+        bound_model = llm.get_model().bind_tools([tool])
+        
+        task = state.get('task', 'complete the task')
+        context = self._build_context(state.get('tool_execution_results', []))
+        prompt = f"Use the {tool_name} tool for: {task}{context}\nIMPORTANT: Call the {tool_name} tool with appropriate arguments."
+        
+        tool_args = {}
+        try:
+            response = bound_model.invoke(prompt)
+            if hasattr(response, 'tool_calls') and response.tool_calls:
+                tool_args = response.tool_calls[0].get('args', {})
+        except Exception:
+            pass
+
+        # Check for interrupt
+        if self._should_interrupt(tool_name, tool_args, state):
+            return interrupt({
+                "message": f"Confirmation required for executing {tool_name}",
+                "tool_name": tool_name,
+                "tool_args": tool_args,
+                "task": task,
+                "context": context,
+                "tool_execution_key": f"{tool_name}:{hash(str(tool_args))}"
+            })
+        
+        # Execute tool
+        try:
+            tool_result = await self._execute_tool(tool_name, tool_args) if tool_args else "No arguments generated"
+            new_state['tool_execution_results'] = [{'tool': tool_name, 'args': tool_args, 'result': tool_result}]
+            new_state['executed_tools'] = [tool_name]
+        except Exception as e:
+            new_state['tool_execution_results'] = [{'tool': tool_name, 'args': tool_args, 'result': f"Error: {str(e)}"}]
+            new_state['executed_tools'] = [tool_name]
+        
+        return new_state
+
+    def _build_context(self, tool_results: List[Dict]) -> str:
+        if not tool_results:
+            return ""
+        context = "\nPrevious results:\n"
+        for result in tool_results[-2:]:
+            context += f"- {result.get('tool')}: {str(result.get('result', ''))}\n"
+        return context
+
+    def _should_interrupt(self, tool_name: str, tool_args: Dict, state: Dict) -> bool:
+        if tool_name not in self.guarded:
+            return False
+        
+        approved_tools = state.get('approved_tools', set()) or set()
+        tool_execution_key = f"{tool_name}:{hash(str(tool_args))}"
+        
+        # Check if exact tool execution key is approved
+        if tool_execution_key in approved_tools:
+            return False
+            
+        # Check if any approval exists for this tool name (more flexible)
+        for approved_key in approved_tools:
+            if approved_key.startswith(f"{tool_name}:"):
+                return False
+        
+        return True
 
     async def _execute_tool(self, tool_name: str, tool_args: Dict[str, Any]) -> Any:
-        """Execute tool safely"""
+        tool = self.available_tools[tool_name]
         try:
-            tool = self.available_tools[tool_name]
-            if hasattr(tool, 'ainvoke'):
-                return await tool.ainvoke(tool_args)
-            else:
-                return tool.invoke(tool_args)
+            return await tool.ainvoke(tool_args) if hasattr(tool, 'ainvoke') else tool.invoke(tool_args)
         except Exception as e:
             return f"Error: {str(e)}"
 
     def finish_node(self, state):
-        """Completion node"""
         state['status'] = 'completed'
         return state
 
-
-
-    def _resolve_navigation_keywords(self, blueprint: Dict[str, Any]):
-        """Resolve navigation keywords like NEXT, PREVIOUS, etc."""
+    def create_skeleton(self, task: str, blueprint: Dict[str, Any]):
         nodes = blueprint['nodes']
         edges = blueprint['edges']
-        conditional_edges = blueprint.get('conditional_edges', {})
-        
-        # Build node sequence map from edges
-        next_node_map = {}
-        previous_node_map = {}
-        
-        for from_node, to_node in edges:
-            next_node_map[from_node] = to_node
-            previous_node_map[to_node] = from_node
-        
-        # Resolve keywords in conditional edges
-        resolved_conditional_edges = {}
-        for from_node, route_map in conditional_edges.items():
-            resolved_route_map = {}
-            for route_key, target_node in route_map.items():
-                if target_node == 'NEXT':
-                    # Find the next node after from_node
-                    resolved_target = next_node_map.get(from_node, 'finish')
-                elif target_node == 'PREVIOUS':
-                    # Find the previous node before from_node
-                    resolved_target = previous_node_map.get(from_node, nodes[0])
-                elif target_node == 'END':
-                    resolved_target = END
-                elif target_node == 'FINISH':
-                    resolved_target = 'finish'
-                else:
-                    # Use as-is (explicit node name)
-                    resolved_target = target_node
-                
-                resolved_route_map[route_key] = resolved_target
-                print(f"🔗 Resolved: {from_node}.{route_key} -> {target_node} becomes -> {resolved_target}")
-            
-            resolved_conditional_edges[from_node] = resolved_route_map
-        
-        return resolved_conditional_edges
-
-    def create_skeleton(self, task: str, blueprint: Dict[str, Any]):
-        """Build the workflow graph from blueprint"""
-        nodes = blueprint['nodes']
-        edges = blueprint['edges']  
         node_tools = blueprint.get('node_tools', {})
-        
-        # Resolve navigation keywords in conditional edges
-        conditional_edges = self._resolve_navigation_keywords(blueprint)
+        conditional_edges = blueprint.get('conditional_edges', {})
         
         # Add nodes
         for node in nodes:
@@ -300,29 +248,25 @@ class Skeleton:
             elif node.lower() == 'finish':
                 self.workflow.add_node(node, self.finish_node)
             elif node in node_tools:
-                # Node with specific tools
-                self.workflow.add_node(node, self.tool_node(node_tools[node], node))
+                self.workflow.add_node(node, partial(self.tool_node_execute, tool_names=node_tools[node], node_name=node))
             else:
-                # Default node (pass-through)
                 self.workflow.add_node(node, lambda state: state)
         
-        # Add regular edges
+        # Add edges
         if nodes:
             self.workflow.add_edge(START, nodes[0])
         
         for from_node, to_node in edges:
             self.workflow.add_edge(from_node, to_node)
         
-        # Add conditional edges (especially for Colleagues routing)
+        # Add conditional edges
         for from_node, route_map in conditional_edges.items():
             if from_node.lower() == 'colleagues':
-                # Use colleagues-specific routing logic
                 self.workflow.add_conditional_edges(from_node, self.colleagues_router_logic, route_map)
             else:
-                # Generic conditional edge (if needed later)
                 self.workflow.add_conditional_edges(from_node, lambda state: state.get('route', 'default'), route_map)
         
-        # Add END edges for terminal nodes (nodes with no outgoing edges and no conditional edges)
+        # Add END edges for terminal nodes
         terminal_nodes = set(nodes) - {edge[0] for edge in edges} - set(conditional_edges.keys())
         for terminal in terminal_nodes:
             self.workflow.add_edge(terminal, END)
@@ -331,55 +275,37 @@ class Skeleton:
         return self.workflow
     
     def compile_and_visualize(self, task_name: str = "workflow"):
-        """Compile and create PNG"""
-        compiled_graph = self.workflow.compile()
+        from langgraph.checkpoint.memory import MemorySaver
+        compiled_graph = self.workflow.compile(checkpointer=MemorySaver())
         
         # Create PNG
         os.makedirs('graph_images', exist_ok=True)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        png_file = f"graph_images/{task_name}_{timestamp}.png"
+        png_file = f"graph_images/{task_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
         
         try:
-            png_data = compiled_graph.get_graph().draw_mermaid_png()
             with open(png_file, 'wb') as f:
-                f.write(png_data)
+                f.write(compiled_graph.get_graph().draw_mermaid_png())
             return compiled_graph, [png_file]
         except Exception:
             return compiled_graph, []
 
 async def run_skeleton(user_email: str, blueprint: Dict[str, Any], task_name: str = "workflow"):
-    """Execute skeleton with blueprint"""
     skeleton = Skeleton(user_email=user_email)
     
-    # Extract all tools from node_tools
-    node_tools = blueprint.get('node_tools', {})
-    all_tools = []
-    for tools in node_tools.values():
-        all_tools.extend(tools)
+    # Extract and load tools
+    all_tools = [tool for tools in blueprint.get('node_tools', {}).values() for tool in tools]
     
     try:
         await skeleton.load_tools(all_tools)
         skeleton.create_skeleton(task_name, blueprint)
         compiled_graph, viz_files = skeleton.compile_and_visualize(task_name)
         
-        result = await compiled_graph.ainvoke({"messages": ["search for excel leads spreadsheet and send email to amir in the leads saying hello"], "task": task_name})
-        return result, viz_files
+        initial_state = {"messages": ["search for excel leads spreadsheet and send email to amir in the leads saying hello"], "task": task_name}
+        config = {"configurable": {"thread_id": "workflow_thread"}}
+        result = await compiled_graph.ainvoke(initial_state, config=config)
+        
+        return result, viz_files, compiled_graph, skeleton
         
     except Exception as e:
         print(f"Error: {e}")
-        return None, []
-    finally:
-        await skeleton.cleanup_tools()
-
-
-
-# if __name__ == "__main__":
-#     # Skeleton is meant to be used as a library
-#     # Example usage:
-#     # from Global.Architect.skeleton import run_skeleton, create_default_config
-#     # result, viz_files = await run_skeleton(user_email="...", tool_names=["..."])
-    
-#     print("Skeleton module loaded. Import and call run_skeleton() to use.")
-#     print("Example:")
-#     print("  from Global.Architect.skeleton import run_skeleton")
-#     print("  result, viz = await run_skeleton(user_email='...', tool_names=['...'])")
+        return None, [], None, None
