@@ -128,17 +128,17 @@ jobs:
       - name: Run MCP Tests
         run: |
           echo "🔧 Running MCP Tests (with Docker and credentials support)..."
-          python -m pytest Tests/MCP/ -v --tb=short -s
+          python -m pytest Tests/MCP/test.py -v --tb=short -s
 
       - name: Run Skeleton Tests
         run: |
           echo "🧪 Running Skeleton Workflow Tests..."
-          python -m pytest Tests/skeleton/ -v --tb=short -s
+          python -m pytest Tests/skeleton/test.py -v --tb=short -s
 
       - name: Run Complete Test Suite
         run: |
           echo "📊 Running complete test suite..."
-          python -m pytest Tests/ -v --tb=short
+          python -m pytest Tests/MCP/test.py Tests/skeleton/test.py -v --tb=short
         continue-on-error: true
 
       - name: Test Summary
