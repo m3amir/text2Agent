@@ -36,4 +36,8 @@ pytest>=7.0.0
 pytest-asyncio>=0.21.0
 pytest-mock>=3.10.0
 asyncio-mqtt
-langgraph 
+langgraph
+psycopg2-binary
+pyyaml
+pydantic
+typing_extensions 
