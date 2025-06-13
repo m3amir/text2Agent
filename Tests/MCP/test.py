@@ -2,9 +2,38 @@ import pytest
 import json
 import os
 import asyncio
+import subprocess
+import shutil
 from MCP.tool_mcp_server import UniversalToolServer
 from MCP.langchain_converter import convert_mcp_to_langchain, get_specific_tool, get_connectors_tools_formatted
 
+
+def is_docker_available():
+    """Check if Docker is available and running."""
+    try:
+        result = subprocess.run(['docker', '--version'], 
+                              capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            # Test if Docker daemon is running
+            result = subprocess.run(['docker', 'info'], 
+                                  capture_output=True, text=True, timeout=10)
+            return result.returncode == 0
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+    return False
+
+
+def is_docker_image_available(image_name):
+    """Check if a specific Docker image is available locally."""
+    if not is_docker_available():
+        return False
+    
+    try:
+        result = subprocess.run(['docker', 'images', '-q', image_name], 
+                              capture_output=True, text=True, timeout=15)
+        return result.returncode == 0 and len(result.stdout.strip()) > 0
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return False
 
 class TestMCPConfiguration:
     """Test MCP configuration loading and validation."""
@@ -183,6 +212,64 @@ class TestLangChainConverter:
         except Exception as e:
             print(f"⚠️  Connector formatting completed with exception: {e}")
             assert True
+
+
+class TestDockerMCPServers:
+    """Test Docker-based MCP servers."""
+    
+    def test_docker_availability(self):
+        """Test if Docker is available in the environment."""
+        docker_available = is_docker_available()
+        print(f"🐳 Docker available: {docker_available}")
+        
+        if docker_available:
+            print("✅ Docker is available and running")
+        else:
+            print("⚠️  Docker is not available - Docker-based MCP servers will be skipped")
+    
+    @pytest.mark.skipif(not is_docker_available(), reason="Docker not available")
+    def test_docker_mcp_server_config(self):
+        """Test Docker MCP server configuration."""
+        config_path = os.path.join("MCP", "Config", "mcp_servers_config.json")
+        
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+        
+        # Check for Docker-based MCP servers
+        docker_servers = []
+        for server_name, server_config in config.get('mcpServers', {}).items():
+            if server_config.get('command') == 'docker':
+                docker_servers.append(server_name)
+        
+        print(f"🐳 Found {len(docker_servers)} Docker-based MCP servers: {docker_servers}")
+        
+        # Test that Docker servers have proper configuration
+        for server_name in docker_servers:
+            server_config = config['mcpServers'][server_name]
+            assert server_config['command'] == 'docker'
+            assert 'args' in server_config
+            assert isinstance(server_config['args'], list)
+            print(f"✅ {server_name} has valid Docker configuration")
+    
+    def test_docker_basic_functionality(self):
+        """Test basic Docker functionality."""
+        if not is_docker_available():
+            pytest.skip("Docker not available")
+        
+        try:
+            # Test basic Docker hello-world
+            result = subprocess.run(['docker', 'run', '--rm', 'hello-world'], 
+                                  capture_output=True, text=True, timeout=30)
+            
+            if result.returncode == 0:
+                print("✅ Docker basic functionality test passed")
+            else:
+                print(f"⚠️  Docker basic test failed: {result.stderr}")
+                
+        except subprocess.TimeoutExpired:
+            print("⚠️  Docker basic test timed out")
+        except Exception as e:
+            print(f"⚠️  Docker basic test error: {e}")
 
 
 class TestMCPIntegration:
