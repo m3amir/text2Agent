@@ -20,6 +20,7 @@ class UniversalToolServer:
         self.tools = []
         self.handlers = {}
         self.config = None  # Cache config
+        self.shared_agent_run_id = None  # Shared run ID for all tools
         self._setup_handlers()
     
     def _setup_handlers(self):
@@ -108,11 +109,8 @@ class UniversalToolServer:
                         methods_found += 1
                 
                 # Also check for tool class methods (legacy support)
-                print(f"🔍 Looking for tool classes in {tool_name} module...", file=sys.stderr)
                 all_classes = [(name, obj) for name, obj in inspect.getmembers(module) if inspect.isclass(obj)]
-                print(f"📋 Found classes: {[name for name, obj in all_classes]}", file=sys.stderr)
                 tool_classes = [(name, obj) for name, obj in all_classes if 'Tool' in name and name != 'Tool']
-                print(f"🎯 Tool classes: {[name for name, obj in tool_classes]}", file=sys.stderr)
                 tool_class = tool_classes[0][1] if tool_classes else None
                 
                 if tool_class:
@@ -139,16 +137,43 @@ class UniversalToolServer:
         async def handler(arguments: Dict[str, Any]):
             try:
                 print(f"🔧 Instantiating {tool_class.__name__} for {method_name}", file=sys.stderr, flush=True)
+                print(f"📋 Arguments received: {arguments}", file=sys.stderr, flush=True)
                 credentials = self._get_credentials(tool_class.__name__)
-                instance = tool_class(credentials) if credentials else tool_class()
+                
+                # Ensure all tools use the same agent run ID
+                if not self.shared_agent_run_id:
+                    from datetime import datetime
+                    import uuid
+                    self.shared_agent_run_id = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:8]}"
+                    print(f"🆔 Using shared agent run ID: {self.shared_agent_run_id}", file=sys.stderr, flush=True)
+                
+                # Initialize tool with shared agent run ID
+                if credentials:
+                    instance = tool_class(credentials, agent_run_id=self.shared_agent_run_id)
+                else:
+                    instance = tool_class(agent_run_id=self.shared_agent_run_id)
                 print(f"✅ {tool_class.__name__} instantiated, calling {method_name}", file=sys.stderr, flush=True)
+                
                 result = getattr(instance, method_name)(**arguments)
                 
                 if inspect.iscoroutine(result):
                     result = await result
                 
+                # Special debugging for PDF tools
+                if method_name.startswith('pdf_') and hasattr(instance, 'charts_folder'):
+                    import os
+                    if os.path.exists(instance.charts_folder):
+                        chart_files = os.listdir(instance.charts_folder)
+                        print(f"🗂️  Charts folder contains: {chart_files}", file=sys.stderr, flush=True)
+                    else:
+                        print(f"📁 Charts folder does not exist: {instance.charts_folder}", file=sys.stderr, flush=True)
+                
+                print(f"✅ Tool result: {result}", file=sys.stderr, flush=True)
                 return [TextContent(type="text", text=str(result))]
             except Exception as e:
+                print(f"❌ Tool execution error: {str(e)}", file=sys.stderr, flush=True)
+                import traceback
+                traceback.print_exc(file=sys.stderr)
                 return [TextContent(type="text", text=f"Error: {str(e)}")]
         return handler
     

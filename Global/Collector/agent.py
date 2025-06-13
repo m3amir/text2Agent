@@ -47,12 +47,27 @@ class State(TypedDict):
     answered_questions: List[str]
     reviewed: bool
     connector_tools: dict
+    final_result: dict
 
 class Collector:
     def __init__(self, agent_description: str, user_email: str):
         self.agent_description = agent_description
         self.warehouse = PromptWarehouse('m3')
         self.connectors = load_connectors()
+        self.verbose_description = self.expand_task_description(agent_description)
+    
+    def expand_task_description(self, task_description: str) -> str:
+        """Use LLM to create a more verbose and detailed explanation of the task"""
+        llm = LLM()
+        expansion_prompt = self.warehouse.get_prompt('expansion')
+        expansion_prompt += "\n\n" + "Original task description: " + task_description + "\n\n" + "Provide a concise task elaboration:"
+        try:
+            response = llm.model.invoke(expansion_prompt)
+            verbose_description = response.content if hasattr(response, 'content') else str(response)
+            return verbose_description
+        except Exception as e:
+            print(f"⚠️ Could not expand task description: {e}")
+            return task_description
 
     def human_approval(self, state: State):
         if state['answered_questions']:
@@ -72,8 +87,6 @@ class Collector:
             
             for tool_name, tool_info in tools.items():
                 description = tool_info['description']
-                if len(description) > 100:
-                    description = description[:97] + "..."
                 formatted_tools += f"  • {tool_name}: {description}\n"
                 
                 if tool_info.get('argument_schema') and tool_info['argument_schema'].get('properties'):
@@ -123,59 +136,59 @@ class Collector:
         state['connectors'] = valid_connectors
         state['connector_tools'] = self.load_connector_tools(valid_connectors)
         tools = self.format_tools(state['connector_tools'])
-        prompt = self.warehouse.get_prompt('tools') + "\n\n" + "User Agent Description: " + state['input'] + "\n\n" + "Available Tools: " + tools
+        prompt = (self.warehouse.get_prompt('tools') + "\n\n" + 
+                 "User Agent Description: " + state['input'] + "\n\n" +
+                 "Detailed Task Analysis:\n" + self.verbose_description + "\n\n" +
+                 "Available Tools: " + tools)
         chosen_tools = llm.formatted(prompt, toolsResponse)
         print("chosen_tools", chosen_tools)
+        
+        # Create simplified final result with tools, descriptions, and task description
+        final_result = {
+            "task_description": self.verbose_description,
+            "tools": {}
+        }
+        
+        # Extract tool descriptions from connector_tools
+        if hasattr(chosen_tools, 'tools') and chosen_tools.tools:
+            for connector_name, connector_tools_dict in chosen_tools.tools.items():
+                for tool_name in connector_tools_dict.keys():
+                    # Find the tool description from state['connector_tools']
+                    if connector_name in state['connector_tools'] and tool_name in state['connector_tools'][connector_name]:
+                        tool_info = state['connector_tools'][connector_name][tool_name]
+                        final_result["tools"][tool_name] = tool_info.get('description', 'No description available')
+                    else:
+                        final_result["tools"][tool_name] = 'No description available'
+        
+        state['final_result'] = final_result
         return state
 
     def load_connector_tools(self, valid_connectors):
-        """Load tools using existing MCP infrastructure"""
-        import asyncio
+        """Load tools using our local connector infrastructure"""
+        from Global.Collector.connectors import get_multiple_connector_tools_sync
         
         connector_tools = {}
         
         try:
-            # Handle running event loop properly
-            from MCP.langchain_converter import convert_mcp_to_langchain
+            # Use our connector system to get tools for valid connectors only
+            all_tools = get_multiple_connector_tools_sync(valid_connectors)
             
-            # Check if we're in an async context
-            try:
-                loop = asyncio.get_running_loop()
-                # We're in an async context, create a task
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(asyncio.run, convert_mcp_to_langchain())
-                    mcp_tools = future.result(timeout=30)
-            except RuntimeError:
-                # No running loop, safe to use asyncio.run()
-                mcp_tools = asyncio.run(convert_mcp_to_langchain())
-            
-            # Group tools by connector
-            for tool in mcp_tools:
-                tool_name = getattr(tool, 'name', str(tool))
+            for connector_name in valid_connectors:
+                connector_tools[connector_name] = {}
                 
-                # Match tool prefix to valid connectors
-                for connector_name in valid_connectors:
-                    if tool_name.lower().startswith(connector_name.lower()):
-                        if connector_name not in connector_tools:
-                            connector_tools[connector_name] = {}
-                        
-                        # Extract basic tool info
-                        description = getattr(tool, 'description', f'Tool: {tool_name}')
-                        schema = getattr(tool, 'args_schema', {}) or {}
-                        
+                if connector_name in all_tools:
+                    tool_schemas = all_tools[connector_name]['tool_schemas']
+                    
+                    for tool_name, tool_schema in tool_schemas.items():
                         connector_tools[connector_name][tool_name] = {
-                            'description': description[:200] + "..." if len(description) > 200 else description,
-                            'argument_schema': schema
+                            'description': tool_schema.get('description', f'Tool: {tool_name}'),
+                            'argument_schema': tool_schema.get('args_schema', {})
                         }
-                        break
-            
-            # Log results
-            for connector_name, tools in connector_tools.items():
-                print(f"✓ Loaded {len(tools)} tools for {connector_name}")
+                
+                print(f"✓ Loaded {len(connector_tools[connector_name])} tools for {connector_name}")
                 
         except Exception as e:
-            print(f"Error loading MCP tools: {e}")
+            print(f"Error loading connector tools: {e}")
             # Return empty dict on error
             for connector_name in valid_connectors:
                 connector_tools[connector_name] = {}
@@ -189,6 +202,9 @@ class Collector:
             connector_info += f"{connector}: {description}\n"
 
         prompt = self.warehouse.get_prompt('collector') + connector_info + f"\n\nUser Agent Description: {state['input']}"
+        
+        # Add verbose task analysis for better context
+        prompt += f"\n\nDetailed Task Analysis:\n" + "="*40 + "\n{self.verbose_description}\n"
         
         if state['answered_questions']:
             prompt += "\n\nAdditional Context from User Answers:\n" + "="*40 + "\n"
@@ -215,6 +231,7 @@ class Collector:
         
         prompt = (self.warehouse.get_prompt('feedback') + '\n\n' + 
                  'User Agent Description: ' + state['input'] + '\n\n' + 
+                 'Detailed Task Analysis:\n' + self.verbose_description + '\n\n' +
                  'Connectors:\n' + formatted_connectors)
         
         llm = LLM()
@@ -237,7 +254,7 @@ class Collector:
                 if not tool_info:
                     continue
                     
-                desc = tool_info['description'][:100] + "..." if len(tool_info['description']) > 100 else tool_info['description']
+                desc = tool_info['description']
                 formatted += f"• {tool_name}: {desc}\n"
                 
                 if tool_info.get('argument_schema') and tool_info['argument_schema'].get('properties'):
@@ -250,11 +267,12 @@ class Collector:
         return formatted + "● Required, ○ Optional"
 
 if __name__ == "__main__":
+    # First task: Email cold outreach agent
     agent_description = "I want an agent that takes emails from a file in our document storage and sends cold emails to the people in the file about a new product we are launching."
     collector = Collector(agent_description, user_email="amir@m3labs.co.uk")
     graph = collector.init_agent()
     config = {"configurable": {"thread_id": uuid.uuid4()}}
-    result = asyncio.run(graph.ainvoke({"input": agent_description, "connectors": [], "feedback_questions": [], "answered_questions": [], "reviewed": False, "connector_tools": {}}, config=config))
+    result = asyncio.run(graph.ainvoke({"input": agent_description, "connectors": [], "feedback_questions": [], "answered_questions": [], "reviewed": False, "connector_tools": {}, "final_result": {}}, config=config))
     
     if '__interrupt__' in result and result['__interrupt__']:
         questions = result['__interrupt__'][0].value['questions']
@@ -275,6 +293,44 @@ if __name__ == "__main__":
                 print("⚠️  Please provide a non-empty answer.")
         
         print("\n✅ All questions answered! Processing your responses...")
-        connectors = asyncio.run(graph.ainvoke(Command(resume={"questions": response}), config=config))['connectors']
+        final_result = asyncio.run(graph.ainvoke(Command(resume={"questions": response}), config=config))
+        print(final_result.get('final_result', {}))
     else:
         print("No interrupt occurred - process completed without feedback questions.")
+        print(result.get('final_result', {}))
+    
+    print("\n" + "="*80)
+    print("🎨 SECOND TASK: Chart Generation and PDF Report")
+    print("="*80)
+    
+    # Second task: Chart generation and PDF report
+    chart_agent_description = "I want an agent that generates random charts with sample data and creates a comprehensive PDF report that includes these charts with analysis and insights."
+    chart_collector = Collector(chart_agent_description, user_email="amir@m3labs.co.uk")
+    chart_graph = chart_collector.init_agent()
+    chart_config = {"configurable": {"thread_id": uuid.uuid4()}}
+    chart_result = asyncio.run(chart_graph.ainvoke({"input": chart_agent_description, "connectors": [], "feedback_questions": [], "answered_questions": [], "reviewed": False, "connector_tools": {}, "final_result": {}}, config=chart_config))
+    
+    if '__interrupt__' in chart_result and chart_result['__interrupt__']:
+        chart_questions = chart_result['__interrupt__'][0].value['questions']
+        chart_response = {}
+        
+        print("\n" + "="*60)
+        print("📋 CHART TASK FEEDBACK QUESTIONS - Please provide your answers:")
+        print("="*60)
+        
+        for i, question in enumerate(chart_questions, 1):
+            print(f"\n🔸 Question {i}: {question}")
+            print("-" * 50)
+            while True:
+                answer = input("Your answer: ").strip()
+                if answer:
+                    chart_response[question] = answer
+                    break
+                print("⚠️  Please provide a non-empty answer.")
+        
+        print("\n✅ All chart questions answered! Processing your responses...")
+        chart_final_result = asyncio.run(chart_graph.ainvoke(Command(resume={"questions": chart_response}), config=chart_config))
+        print(chart_final_result.get('final_result', {}))
+    else:
+        print("No interrupt occurred for chart task - process completed without feedback questions.")
+        print(chart_result.get('final_result', {}))

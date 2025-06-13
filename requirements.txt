@@ -27,3 +27,12 @@ reportlab
 docx2txt
 PyPDF2
 openpyxlc
+# Chart generation dependencies
+matplotlib
+seaborn
+plotly
+pandas
+numpy
+wordcloud
+aiohttp
+aiofiles

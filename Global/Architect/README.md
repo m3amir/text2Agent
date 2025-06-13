@@ -15,6 +15,198 @@ The `Skeleton` class creates streamlined workflows that execute tools, analyze r
 ✅ **Real Tool Results** - Executes actual tools with real data  
 ✅ **Clean Logging** - Comprehensive S3 logging and tracking  
 ✅ **Minimal Code** - 50% smaller codebase, easier to maintain  
+✅ **🚨 Interrupt System** - User confirmation for sensitive operations  
+
+## 🚨 Interrupt System
+
+The Skeleton system includes a powerful interrupt mechanism that pauses workflow execution before sensitive tools (like email sending) to require user confirmation.
+
+### How It Works
+
+1. **Automatic Detection**: Workflow automatically detects when a "guarded" tool is about to execute
+2. **LangGraph Interrupt**: Uses LangGraph's built-in `interrupt()` function to pause execution
+3. **User Confirmation**: Shows complete tool details and asks for user approval
+4. **Seamless Resume**: After approval, workflow continues from exactly where it left off
+5. **State Persistence**: All workflow state is preserved during the interrupt
+
+### Guarded Tools
+
+By default, these tools require user confirmation:
+- `microsoft_mail_send_email_as_user`
+- `microsoft_send_email_as_user`
+
+### Configuration
+
+```python
+# In Skeleton class initialization
+self.guarded = {
+    'microsoft_mail_send_email_as_user', 
+    'microsoft_send_email_as_user'
+}
+
+# Add more tools to require confirmation
+skeleton.guarded.add('dangerous_tool_name')
+```
+
+### Interrupt Flow Example
+
+```python
+# Normal execution until email tool
+🔧 tool_node_execute: microsoft_sharepoint_search_files ✅
+🔧 colleagues_analysis: Score 9.5/10 ✅  
+🔧 tool_node_execute: microsoft_sharepoint_download_and_extract_text ✅
+🔧 colleagues_analysis: Score 9.5/10 ✅
+🔧 tool_node_execute: microsoft_mail_send_email_as_user 🚨
+
+# Workflow pauses and shows details:
+🔴 WORKFLOW INTERRUPTED!
+📧 About to execute: microsoft_mail_send_email_as_user
+Recipients: ['user@example.com']
+Subject: Lead Information  
+Body: Hello! We have some lead information for you...
+
+Do you want to continue? (y/n): y
+
+# After approval, workflow resumes automatically:
+✅ User approved - resuming workflow...
+🔧 tool_node_execute: microsoft_mail_send_email_as_user ✅
+✅ SUCCESS - Email sent after user approval!
+```
+
+### Implementation Details
+
+#### Interrupt Detection
+```python
+def _should_interrupt(self, tool_name: str, tool_args: Dict, state: Dict) -> bool:
+    if tool_name not in self.guarded:
+        return False
+    
+    # Check if tool was already approved
+    approved_tools = state.get('approved_tools', set()) or set()
+    
+    # Flexible approval checking - handles LLM argument variations
+    for approved_key in approved_tools:
+        if approved_key.startswith(f"{tool_name}:"):
+            return False
+    
+    return True
+```
+
+#### State Management
+```python
+class WorkflowState(TypedDict, total=False):
+    # ... existing fields ...
+    approved_tools: Annotated[set, replace_value]  # Tracks user approvals
+```
+
+#### Resume Logic
+```python
+# After user approval:
+compiled_graph.update_state(config, {"approved_tools": approved_tools})
+
+# Workflow continues automatically using stream
+async for chunk in compiled_graph.astream(None, config=config):
+    result = chunk
+```
+
+### Complete Example with Interrupt
+
+```python
+import asyncio
+from Global.Architect.skeleton import run_skeleton
+
+async def test_with_interrupt():
+    blueprint = {
+        'nodes': ['Microsoft', 'Colleagues', 'finish'],
+        'edges': [('Microsoft', 'Colleagues')],
+        'conditional_edges': {
+            'Colleagues': {
+                'retry_same': 'Microsoft',
+                'next_tool': 'Microsoft', 
+                'next_step': 'finish'
+            }
+        },
+        'node_tools': {
+            'Microsoft': [
+                'microsoft_sharepoint_search_files',
+                'microsoft_sharepoint_download_and_extract_text', 
+                'microsoft_mail_send_email_as_user'  # This will trigger interrupt
+            ]
+        }
+    }
+    
+    try:
+        result, viz_files, compiled_graph, skeleton = await run_skeleton(
+            user_email='user@example.com',
+            blueprint=blueprint,
+            task_name='Send email from leads file'
+        )
+        
+        # Check if workflow was interrupted
+        if '__interrupt__' in result and result['__interrupt__']:
+            interrupt_info = result['__interrupt__'][0].value
+            
+            print(f"\n🔴 WORKFLOW INTERRUPTED!")
+            print(f"📧 About to execute: {interrupt_info.get('tool_name')}")
+            print(f"Recipients: {interrupt_info.get('tool_args', {}).get('recipients', [])}")
+            print(f"Subject: {interrupt_info.get('tool_args', {}).get('subject', 'No subject')}")
+            print(f"Body: {interrupt_info.get('tool_args', {}).get('body', 'No body')[:200]}...")
+            
+            # Get user confirmation
+            user_response = input("\nDo you want to continue? (y/n): ").lower().strip()
+            
+            if user_response in ['y', 'yes']:
+                print("✅ User approved - resuming workflow...")
+                
+                # Resume workflow
+                config = {"configurable": {"thread_id": "workflow_thread"}}
+                current_state = compiled_graph.get_state(config)
+                tool_execution_key = interrupt_info.get('tool_execution_key')
+                
+                approved_tools = current_state.values.get('approved_tools', set()) or set()
+                approved_tools.add(tool_execution_key)
+                
+                # Update state and resume
+                compiled_graph.update_state(config, {"approved_tools": approved_tools})
+                
+                result = None
+                async for chunk in compiled_graph.astream(None, config=config):
+                    result = chunk
+                
+                final_state = compiled_graph.get_state(config)
+                result = final_state.values
+                
+                print("✅ SUCCESS - Email sent after user approval!")
+            else:
+                print("❌ User declined - workflow cancelled")
+                return None
+        
+        return result
+        
+    finally:
+        if skeleton:
+            await skeleton.cleanup_tools()
+
+if __name__ == "__main__":
+    asyncio.run(test_with_interrupt())
+```
+
+### Benefits
+
+1. **Security**: Prevents accidental execution of sensitive operations
+2. **Transparency**: User sees exactly what will be executed before it happens
+3. **Control**: User has full control over sensitive tool execution
+4. **Audit Trail**: All approvals and executions are logged
+5. **Flexibility**: Easy to add/remove tools from the guarded list
+6. **Seamless**: Workflow continues naturally after approval
+
+### Technical Notes
+
+- **LangGraph Integration**: Uses LangGraph's native interrupt system
+- **State Persistence**: All workflow state is preserved during interrupts
+- **Flexible Matching**: Handles cases where LLM generates slightly different arguments on resume
+- **Thread Safety**: Uses consistent thread IDs for state management
+- **Error Handling**: Graceful fallbacks if interrupt/resume fails
 
 ## Quick Start
 
@@ -141,6 +333,9 @@ class WorkflowState(TypedDict, total=False):
     colleagues_analysis: str               # AI analysis of execution
     colleagues_score: int                  # Quality score (0-10)
     status: str                           # Workflow status
+    approved_tools: set                    # User-approved tool executions (interrupt system)
+    tool_sequence_index: int               # Current tool position in node
+    current_node_tools: str                # JSON string of available tools in current node
 ```
 
 ## File Structure
