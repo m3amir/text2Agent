@@ -40,4 +40,3 @@ langgraph
 psycopg2-binary
 pyyaml
 pydantic
-typing_extensions 
