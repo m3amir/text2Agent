@@ -175,6 +175,22 @@ jobs:
           echo "🧪 Running actual tests:"
           python -m pytest Tests/skeleton/test.py -v --tb=short -s
 
+      - name: Run Prompt Warehouse Tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+        run: |
+          echo "📝 Running Prompt Warehouse Tests..."
+          echo "🔍 Validating prompt structure:"
+          echo "Prompts directory: $(ls -la Prompts/ | head -5)"
+          echo "Test prompts directory: $(ls -la Tests/prompts/ | head -5)"
+          echo "Testing prompt warehouse imports:"
+          python -c "import sys; sys.path.insert(0, '.'); from Prompts.promptwarehouse import PromptWarehouse; print('✅ PromptWarehouse import successful')" || echo "❌ PromptWarehouse import failed"
+          echo "🧪 Running prompt warehouse tests:"
+          python -m pytest Tests/prompts/ -v --tb=short -s
+
       - name: Run Complete Test Suite
         env:
           PYTHONPATH: ${{ github.workspace }}
@@ -183,7 +199,7 @@ jobs:
           AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
         run: |
           echo "📊 Running complete test suite..."
-          python -m pytest Tests/MCP/test.py Tests/skeleton/test.py -v --tb=short
+          python -m pytest Tests/MCP/test.py Tests/skeleton/test.py Tests/prompts/ -v --tb=short
         continue-on-error: true
 
       - name: Test Summary
@@ -192,6 +208,7 @@ jobs:
           echo "✅ Configuration validation: Passed"
           echo "🔧 MCP tests: Completed (with Docker support)"
           echo "🧪 Skeleton tests: Completed (real workflow execution)"
+          echo "📝 Prompt Warehouse tests: Completed (AWS Bedrock integration)"
           echo ""
           echo "🎯 Test Coverage:"
           echo "   • Docker-based MCP servers"
@@ -199,6 +216,9 @@ jobs:
           echo "   • Chart and PDF generation"
           echo "   • Real workflow execution"
           echo "   • MCP server connectivity"
+          echo "   • Prompt warehouse & AWS Bedrock"
+          echo "   • AWS profile fallback handling"
+          echo "   • Real prompt file validation (9 prompts)"
           echo ""  
           echo "🚀 All tests completed successfully!"
 
@@ -229,11 +249,15 @@ jobs:
           python -m pytest Tests/MCP/test.py::test_mcp_directory_structure -v
           python -m pytest Tests/MCP/test.py::test_config_json_validity -v
           python -m pytest Tests/MCP/test.py::TestDockerMCPServers::test_docker_availability -v
+          
+          echo "📝 Running basic prompt warehouse validation..."
+          python -m pytest Tests/prompts/test_promptwarehouse.py::TestPromptWarehouseIntegration::test_promptwarehouse_file_exists -v
+          python -m pytest Tests/prompts/test_promptwarehouse.py::TestPromptWarehouseIntegration::test_real_prompt_files_structure -v
 
       - name: Validate Directory Structure
         run: |
           echo "📁 Validating project structure..."
-          required_dirs=("Tests/skeleton" "Tests/MCP" "MCP/Config" "Global/Architect" "Tools")
+          required_dirs=("Tests/skeleton" "Tests/MCP" "Tests/prompts" "MCP/Config" "Global/Architect" "Tools" "Prompts")
           
           for dir in "${required_dirs[@]}"; do
               if [ -d "$dir" ]; then
@@ -241,6 +265,29 @@ jobs:
               else
                   echo "❌ $dir missing"
                   exit 1
+              fi
+          done
+          
+          echo "📝 Validating prompt warehouse structure..."
+          prompt_files=("Prompts/promptwarehouse.py" "Tests/prompts/test_promptwarehouse.py" "Tests/prompts/test_prompt_integration.py")
+          
+          for file in "${prompt_files[@]}"; do
+              if [ -f "$file" ]; then
+                  echo "✅ $file exists"
+              else
+                  echo "❌ $file missing"
+                  exit 1
+              fi
+          done
+          
+          echo "🔍 Checking real prompt files..."
+          prompt_dirs=("Prompts/collector" "Prompts/STR" "Prompts/poolOfColleagues" "Prompts/task_expansion")
+          
+          for dir in "${prompt_dirs[@]}"; do
+              if [ -f "$dir/prompt.py" ]; then
+                  echo "✅ $dir/prompt.py exists"
+              else
+                  echo "⚠️  $dir/prompt.py not found (optional)"
               fi
           done
           

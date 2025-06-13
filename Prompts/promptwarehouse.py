@@ -4,7 +4,13 @@ import importlib.util
 
 class PromptWarehouse:
     def __init__(self, profile_name):
-        self.session = boto3.Session(profile_name=profile_name, region_name='eu-west-2')
+        try:
+            # Try to use AWS profile first (for local development)
+            self.session = boto3.Session(profile_name=profile_name, region_name='eu-west-2')
+        except Exception:
+            # Fall back to environment variables (for GitHub Actions/CI)
+            self.session = boto3.Session(region_name='eu-west-2')
+        
         self.client = self.session.client("bedrock-agent", region_name='eu-west-2')
 
     def create_prompt(self, name: str, description: str, prompt: str):
