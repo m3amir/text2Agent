@@ -91,6 +91,8 @@ async def get_mcp_tools_with_session(server_command=None, server_args=None):
         error_msg = str(e)
         if "asynchronous generator" in error_msg:
             print(f"MCP session async generator conflict (expected in tests): {e}")
+        elif "TaskGroup" in error_msg:
+            print(f"MCP session TaskGroup error (expected in tests): {e}")
         else:
             print(f"Error creating MCP session: {e}")
         yield []
