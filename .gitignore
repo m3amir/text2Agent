@@ -8,11 +8,10 @@ logs/
 
 *.pyc
 
-# Secret files with credentials (keep .example files)
+# Secret files with credentials (config files now use environment variables)
 Connectors/.gdrive-server-credentials.json
 MCP/Config/config.json
 graph_images/
-# Note: .example files are included for reference
 
 # Environment files
 .env
@@ -36,6 +35,5 @@ env/
 .idea/
 *.swp
 *.swo
-MCP/Config/mcp_servers_config.json
 charts/
 reports/

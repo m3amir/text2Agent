@@ -65,6 +65,8 @@ jobs:
           MICROSOFT_TENANT_ID: ${{ secrets.MICROSOFT_TENANT_ID }}
           MICROSOFT_CLIENT_ID: ${{ secrets.MICROSOFT_CLIENT_ID }}
           MICROSOFT_CLIENT_SECRET: ${{ secrets.MICROSOFT_CLIENT_SECRET }}
+          MICROSOFT_SITE_URL: ${{ secrets.MICROSOFT_SITE_URL }}
+          MICROSOFT_EMAIL: ${{ secrets.MICROSOFT_EMAIL }}
         run: |
           echo "PYTHONPATH=${{ github.workspace }}" >> "$GITHUB_ENV"
           
@@ -74,6 +76,8 @@ jobs:
               echo "MICROSOFT_TENANT_ID=$MICROSOFT_TENANT_ID"
               echo "MICROSOFT_CLIENT_ID=$MICROSOFT_CLIENT_ID"
               echo "MICROSOFT_CLIENT_SECRET=$MICROSOFT_CLIENT_SECRET"
+              echo "MICROSOFT_SITE_URL=$MICROSOFT_SITE_URL"
+              echo "MICROSOFT_EMAIL=$MICROSOFT_EMAIL"
             } >> "$GITHUB_ENV"
             echo "✅ Microsoft Graph API credentials available"
           else
