@@ -126,16 +126,22 @@ jobs:
           "
 
       - name: Run MCP Tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}
         run: |
           echo "🔧 Running MCP Tests (with Docker and credentials support)..."
           python -m pytest Tests/MCP/test.py -v --tb=short -s
 
       - name: Run Skeleton Tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}
         run: |
           echo "🧪 Running Skeleton Workflow Tests..."
           python -m pytest Tests/skeleton/test.py -v --tb=short -s
 
       - name: Run Complete Test Suite
+        env:
+          PYTHONPATH: ${{ github.workspace }}
         run: |
           echo "📊 Running complete test suite..."
           python -m pytest Tests/MCP/test.py Tests/skeleton/test.py -v --tb=short
