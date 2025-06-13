@@ -3,10 +3,10 @@ name: Complete Test Suite
 on:
   push:
     branches:
-      - staging
+      - Staging
   pull_request:
     branches:
-      - staging
+      - Staging
 
 jobs:
   full-integration-tests:
