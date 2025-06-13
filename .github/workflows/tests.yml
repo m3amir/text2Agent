@@ -159,6 +159,20 @@ jobs:
           AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
         run: |
           echo "🧪 Running Skeleton Workflow Tests..."
+          echo "🔍 Debugging Python environment:"
+          echo "PYTHONPATH: $PYTHONPATH"
+          echo "Current directory: $(pwd)"
+          echo "Python version: $(python --version)"
+          echo "File structure check:"
+          ls -la Logs/ | head -5
+          ls -la utils/ | head -5
+          ls -la Global/Architect/ | head -5
+          echo "Testing imports:"
+          python -c "import sys; sys.path.insert(0, '.'); print('Python path entries:'); [print(f'  {p}') for p in sys.path[:8]]"
+          python -c "import sys; sys.path.insert(0, '.'); from utils.core import get_tenant_domain_by_email; print('✅ utils.core import successful')" || echo "❌ utils.core import failed"
+          python -c "import sys; sys.path.insert(0, '.'); from Logs.log_manager import LogManager; print('✅ Logs.log_manager import successful')" || echo "❌ Logs.log_manager import failed"
+          python -c "import sys; sys.path.insert(0, '.'); from Global.Architect.skeleton import run_skeleton; print('✅ skeleton import successful')" || echo "❌ skeleton import failed"
+          echo "🧪 Running actual tests:"
           python -m pytest Tests/skeleton/test.py -v --tb=short -s
 
       - name: Run Complete Test Suite
