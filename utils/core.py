@@ -154,7 +154,12 @@ def get_aws_session():
     """Get or create AWS session"""
     global _aws_session
     if not _aws_session:
-        _aws_session = boto3.Session(profile_name=AWS_PROFILE, region_name=AWS_REGION)
+        try:
+            # Try to use AWS profile first (for local development)
+            _aws_session = boto3.Session(profile_name=AWS_PROFILE, region_name=AWS_REGION)
+        except Exception:
+            # Fall back to environment variables (for GitHub Actions/CI)
+            _aws_session = boto3.Session(region_name=AWS_REGION)
     return _aws_session
 
 def get_secret(secret_name: str, region: str = AWS_REGION) -> Dict[str, Any]:

@@ -16,7 +16,14 @@ class LogManager:
         self.email = email
         self.profile_name = profile_name
         self.region_name = region_name
-        self.session = boto3.Session(profile_name=profile_name, region_name=region_name)
+        
+        try:
+            # Try to use AWS profile first (for local development)
+            self.session = boto3.Session(profile_name=profile_name, region_name=region_name)
+        except Exception:
+            # Fall back to environment variables (for GitHub Actions/CI)
+            self.session = boto3.Session(region_name=region_name)
+            
         self.s3_client = self.session.client('s3')
         
         # Get tenant-specific bucket name

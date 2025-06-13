@@ -49,7 +49,12 @@ class STR:
         self.model_arn = "anthropic.claude-3-sonnet-20240229-v1:0"
         
         # Initialize Bedrock client
-        self.session = boto3.Session(profile_name='m3', region_name='eu-west-2')
+        try:
+            # Try to use AWS profile first (for local development)
+            self.session = boto3.Session(profile_name='m3', region_name='eu-west-2')
+        except Exception:
+            # Fall back to environment variables (for GitHub Actions/CI)
+            self.session = boto3.Session(region_name='eu-west-2')
         from botocore.config import Config
         config = Config(retries={'max_attempts': 1, 'mode': 'standard'})
         self.bedrock_agent_client = self.session.client('bedrock-agent-runtime', config=config)
