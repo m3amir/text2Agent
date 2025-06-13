@@ -24,10 +24,10 @@ Handles the discovery and loading of available connectors and their tools from b
 import asyncio
 from Global.Collector.agent import Collector
 
-# 1. Create a collector with your agent description
+# 1. Create a collector with your agent description and user email
 agent_description = "I want an agent that takes emails from a file in our document storage and sends cold emails to the people in the file about a new product we are launching."
 
-collector = Collector(agent_description)
+collector = Collector(agent_description, user_email="user@example.com")
 
 # 2. Initialize the workflow
 graph = collector.init_agent()
@@ -40,7 +40,8 @@ result = asyncio.run(graph.ainvoke({
     "feedback_questions": [],
     "answered_questions": [],
     "reviewed": False,
-    "connector_tools": {}
+    "connector_tools": {},
+    "final_result": {}
 }, config=config))
 ```
 
@@ -76,46 +77,66 @@ The main agent class that orchestrates the entire collection process.
 
 **Constructor:**
 ```python
-collector = Collector(agent_description: str)
+collector = Collector(agent_description: str, user_email: str)
 ```
 
 **Key Methods:**
 - `init_agent()` - Creates and returns the LangGraph workflow
+- `expand_task_description(task_description)` - Uses LLM to create verbose task explanation
 - `validate_connectors(state)` - Validates connectors and selects relevant tools
 - `load_connector_tools(valid_connectors)` - Loads tools for validated connectors
 - `format_tools(connector_tools)` - Formats tools for LLM consumption
+- `format_connectors(connector_tools)` - Formats connector tools with detailed argument schemas
 
 ##### Response Models
 - `connectorResponse` - Structured output for connector identification
-- `feedbackResponse` - Structured output for feedback questions
+- `feedbackResponse` - Structured output for feedback questions  
 - `toolsResponse` - Structured output for tool selection (includes names + descriptions)
+
+##### State Class
+The workflow state includes these fields:
+- `input: str` - Original user description
+- `connectors: List[str]` - Identified connectors
+- `feedback_questions: List[str]` - Generated clarifying questions
+- `answered_questions: List[str]` - User responses to questions
+- `reviewed: bool` - Whether user has completed Q&A
+- `connector_tools: dict` - Loaded tool schemas for connectors
+- `final_result: dict` - Final output with task description and selected tools
 
 #### Workflow Stages
 
-1. **Collect Stage**
-   - Analyzes user description
-   - Identifies required connectors
-   - Uses AI to match capabilities with available connectors
+1. **Task Expansion** (during initialization)
+   - Uses LLM to create a verbose and detailed explanation of the user's task
+   - Provides richer context for connector identification and tool selection
 
-2. **Feedback Stage**
+2. **Collect Stage**
+   - Analyzes user description and expanded task analysis
+   - Identifies required connectors based on capabilities
+   - Uses AI to match requirements with available connectors
+
+3. **Feedback Stage**
    - Generates clarifying questions if description lacks detail
+   - Only runs if no previous questions have been answered
    - Ensures all necessary information is gathered
 
-3. **Human Approval Stage**
-   - Interactive Q&A session with user
+4. **Human Approval Stage**
+   - Interactive Q&A session with user via interrupts
    - Collects additional context and requirements
+   - Sets reviewed flag to true when complete
 
-4. **Validate Connectors Stage**
-   - Loads tools for identified connectors
-   - Uses AI to select most relevant tools
-   - Returns final tool selection with descriptions
+5. **Validate Connectors Stage**
+   - Validates identified connectors against available ones
+   - Loads tools for validated connectors using `get_multiple_connector_tools_sync`
+   - Uses AI to select most relevant tools from available options
+   - Returns final result with expanded task description and selected tools with descriptions
 
 #### Example Output
 
 ```python
-# Final chosen_tools output format:
+# Final result output format:
 {
-    "microsoft": {
+    "task_description": "A comprehensive email marketing agent that...",
+    "tools": {
         "microsoft_sharepoint_download_and_extract_text": "Download a file from SharePoint and extract its text content for analysis.",
         "microsoft_mail_send_email_as_user": "Send an email through Microsoft Graph API on behalf of a specified user."
     }
@@ -200,7 +221,7 @@ To add custom local tools:
 
 ### Interactive Workflow
 
-The agent supports interactive feedback collection:
+The agent supports interactive feedback collection using LangGraph interrupts:
 
 ```python
 # The workflow will automatically interrupt for user input
@@ -214,11 +235,14 @@ if '__interrupt__' in result:
         answer = input(f"{question}: ")
         responses[question] = answer
     
-    # Resume workflow with answers
+    # Resume workflow with answers using Command.resume
     final_result = asyncio.run(
         graph.ainvoke(Command(resume={"questions": responses}), config=config)
     )
 ```
+
+#### Human Approval Method
+The `human_approval` method uses LangGraph's `interrupt()` function to pause execution and collect user input. It requires at least 3 non-empty answers before proceeding to ensure adequate context is gathered.
 
 ### Tool Schema Information
 
@@ -248,15 +272,18 @@ tool_schema = {
 ## Dependencies
 
 ### Required Packages
-- `langgraph` - Workflow orchestration
-- `pydantic` - Data validation and models
+- `langgraph` - Workflow orchestration with StateGraph and interrupts
+- `pydantic` - Data validation and structured response models
 - `boto3` - AWS integration for prompt warehouse
 - `asyncio` - Asynchronous operations
+- `uuid` - Unique identifier generation for thread IDs
 
 ### External Dependencies
-- **MCP Servers** - For remote tool access
-- **Prompt Warehouse** - AWS Bedrock prompts
-- **LLM Module** - AI model integration
+- **MCP Servers** - For remote tool access via MCP protocol
+- **Prompt Warehouse** - AWS Bedrock prompts (collector, tools, feedback, expansion)
+- **LLM Module** - AI model integration with formatted response support
+- **Global.Collector.connectors** - Connector discovery and tool loading
+- **Global.Components.STR** - String processing utilities
 
 ## Error Handling
 
@@ -317,7 +344,7 @@ async def create_email_agent():
     """
     
     # Create and run collector
-    collector = Collector(description)
+    collector = Collector(description, user_email="user@example.com")
     graph = collector.init_agent()
     
     config = {"configurable": {"thread_id": str(uuid.uuid4())}}
@@ -328,7 +355,8 @@ async def create_email_agent():
         "feedback_questions": [],
         "answered_questions": [],
         "reviewed": False,
-        "connector_tools": {}
+        "connector_tools": {},
+        "final_result": {}
     }, config=config)
     
     # Handle interactive feedback if needed
@@ -343,9 +371,10 @@ result = asyncio.run(create_email_agent())
 ```
 
 This will automatically identify Microsoft connectors and select tools like:
-- `microsoft_sharepoint_search_files`
 - `microsoft_sharepoint_download_and_extract_text`
 - `microsoft_mail_send_email_as_user`
+
+The final result will include both the expanded task description and the selected tools with their descriptions.
 
 ## Integration with Other Modules
 

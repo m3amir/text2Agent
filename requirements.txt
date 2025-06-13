@@ -26,13 +26,14 @@ requests
 reportlab
 docx2txt
 PyPDF2
-openpyxlc
 # Chart generation dependencies
 matplotlib
 seaborn
-plotly
 pandas
 numpy
-wordcloud
-aiohttp
 aiofiles
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+pytest-mock>=3.10.0
+asyncio-mqtt
+langgraph 
