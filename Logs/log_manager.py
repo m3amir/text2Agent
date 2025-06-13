@@ -84,22 +84,29 @@ class LogManager:
                 self.logger.info(f"✅ Bucket {bucket_name} exists")
                 return True
             except self.s3_client.exceptions.NoSuchBucket:
-                self.logger.info(f"🔧 Creating tenant bucket {bucket_name}...")
-                if self.region_name == 'us-east-1':
-                    self.s3_client.create_bucket(Bucket=bucket_name)
-                else:
-                    self.s3_client.create_bucket(
-                        Bucket=bucket_name,
-                        CreateBucketConfiguration={'LocationConstraint': self.region_name}
-                    )
-                self.logger.info(f"✅ Created tenant bucket {bucket_name}")
-                return True
+                try:
+                    self.logger.info(f"🔧 Creating tenant bucket {bucket_name}...")
+                    if self.region_name == 'us-east-1':
+                        self.s3_client.create_bucket(Bucket=bucket_name)
+                    else:
+                        self.s3_client.create_bucket(
+                            Bucket=bucket_name,
+                            CreateBucketConfiguration={'LocationConstraint': self.region_name}
+                        )
+                    self.logger.info(f"✅ Created tenant bucket {bucket_name}")
+                    return True
+                except Exception as create_error:
+                    self.logger.warning(f"⚠️  Cannot create bucket {bucket_name} (likely permissions): {create_error}")
+                    self.logger.info(f"📝 Continuing with local logging only")
+                    return False
             except Exception as e:
-                self.logger.error(f"❌ Error checking bucket {bucket_name}: {e}")
+                self.logger.warning(f"⚠️  Error checking bucket {bucket_name}: {e}")
+                self.logger.info(f"📝 Continuing with local logging only")
                 return False
                 
         except Exception as e:
-            self.logger.error(f"❌ Error ensuring bucket exists: {e}")
+            self.logger.warning(f"⚠️  Error ensuring bucket exists: {e}")
+            self.logger.info(f"📝 Continuing with local logging only")
             return False
     
     def categorize_log_file(self, log_file_path: Path) -> str:
@@ -175,7 +182,7 @@ class LogManager:
         }
         
         if not self.ensure_bucket_exists():
-            self.logger.error("❌ Cannot sync - bucket setup failed")
+            self.logger.info("📝 S3 sync unavailable - continuing with local logging only")
             return results
         
         cutoff_time = datetime.now() - timedelta(hours=older_than_hours)
@@ -238,7 +245,7 @@ class LogManager:
             
             # Ensure bucket exists
             if not self.ensure_bucket_exists():
-                self.logger.error("❌ Cannot upload - bucket setup failed")
+                self.logger.info("📝 S3 upload unavailable - continuing with local logging only")
                 return False
             
             # Categorize and upload immediately (bypass safety buffer)

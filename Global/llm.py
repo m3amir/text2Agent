@@ -22,14 +22,24 @@ class LLM:
         
         # Initialize ChatOpenAI with the updated model_kwargs
         if provider == 'bedrock':
-            # Set up AWS session with proper region and profile
-            self.model = ChatBedrock(
-                credentials_profile_name=profile_name,
-                model_id="us.amazon.nova-pro-v1:0",
-                region_name="us-east-1",  # Use the configured region
-                temperature=default_model_kwargs['temperature'],
-                max_tokens=default_model_kwargs['max_tokens'],
-            )
+            # Set up AWS session with proper region and profile fallback
+            try:
+                # Try to use AWS profile first (for local development)
+                self.model = ChatBedrock(
+                    credentials_profile_name=profile_name,
+                    model_id="us.amazon.nova-pro-v1:0",
+                    region_name="us-east-1",  # Use the configured region
+                    temperature=default_model_kwargs['temperature'],
+                    max_tokens=default_model_kwargs['max_tokens'],
+                )
+            except Exception:
+                # Fall back to environment variables (for GitHub Actions/CI)
+                self.model = ChatBedrock(
+                    model_id="us.amazon.nova-pro-v1:0",
+                    region_name="us-east-1",  # Use the configured region
+                    temperature=default_model_kwargs['temperature'],
+                    max_tokens=default_model_kwargs['max_tokens'],
+                )
         else:
             self.model = ChatOpenAI(
                 model_name="gpt-4o",
