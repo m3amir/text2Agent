@@ -377,27 +377,4 @@ def test_config_json_validity():
         pytest.fail(f"Invalid JSON in {config_file}: {e}")
 
 
-if __name__ == "__main__":
-    # Run basic tests
-    print("🧪 Running MCP Tests...")
-    
-    # Test config exists
-    config_path = os.path.join("MCP", "Config", "mcp_servers_config.json")
-    if os.path.exists(config_path):
-        print("✅ Config file exists")
-        
-        with open(config_path, 'r') as f:
-            config = json.load(f)
-            print(f"✅ Config loaded: {len(config.get('local', {}))} local tools, {len(config.get('mcpServers', {}))} MCP servers")
-    else:
-        print("❌ Config file missing")
-    
-    # Test server instantiation
-    try:
-        from MCP.tool_mcp_server import UniversalToolServer
-        server = UniversalToolServer()
-        print("✅ Universal Tool Server can be instantiated")
-    except Exception as e:
-        print(f"❌ Server instantiation failed: {e}")
-    
-    print("🏁 Basic tests complete!") 
+ 

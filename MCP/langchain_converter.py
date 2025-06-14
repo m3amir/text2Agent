@@ -75,10 +75,10 @@ async def get_mcp_tools_with_session(server_command=None, server_args=None):
     
     try:
         async with stdio_client(server_params) as (read, write):
-            session = ClientSession(read, write)
-            await asyncio.wait_for(session.initialize(), timeout=10.0)
-            tools = await asyncio.wait_for(load_mcp_tools(session), timeout=10.0)
-            yield tools
+            async with ClientSession(read, write) as session:
+                await asyncio.wait_for(session.initialize(), timeout=10.0)
+                tools = await asyncio.wait_for(load_mcp_tools(session), timeout=10.0)
+                yield tools
     except asyncio.TimeoutError:
         print("MCP session initialization timed out (expected in CI)")
         yield []
@@ -97,23 +97,8 @@ async def get_mcp_tools_with_session(server_command=None, server_args=None):
             print(f"Error creating MCP session: {e}")
         yield []
     finally:
-        # Ensure proper cleanup
-        if session:
-            try:
-                # Force cleanup without awaiting to avoid hanging
-                pass
-            except:
-                pass
-        
-        # Additional cleanup - try to terminate any hanging processes
-        try:
-            import signal
-            import subprocess
-            # Kill any hanging python processes that might be MCP servers
-            subprocess.run(['pkill', '-f', 'tool_mcp_server.py'], 
-                         capture_output=True, timeout=5)
-        except:
-            pass
+        # Context managers handle cleanup automatically
+        pass
 
 async def get_specific_tool(tool_name, server_command=None, server_args=None):
     """Get a specific tool by name"""

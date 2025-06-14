@@ -37,5 +37,6 @@ env/
 .idea/
 *.swp
 *.swo
-charts/
-reports/
+MCP/Config/mcp_servers_config.json
+tmp/Charts/
+tmp/Reports/

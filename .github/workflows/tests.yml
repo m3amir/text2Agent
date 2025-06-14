@@ -191,6 +191,22 @@ jobs:
           echo "🧪 Running prompt warehouse tests:"
           python -m pytest Tests/prompts/ -v --tb=short -s
 
+      - name: Run Collector Tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+        run: |
+          echo "🤖 Running Collector Agent Tests..."
+          echo "🔍 Validating collector structure:"
+          echo "Global/Collector directory: $(ls -la Global/Collector/ | head -5)"
+          echo "Tests/collector directory: $(ls -la Tests/collector/ | head -5)"
+          echo "Testing collector imports:"
+          python -c "import sys; sys.path.insert(0, '.'); from Global.Collector.agent import Collector; print('✅ Collector import successful')" || echo "❌ Collector import failed"
+          echo "🧪 Running collector tests (mix of real and mocked):"
+          python -m pytest Tests/collector/test.py -v --tb=short -s
+
       - name: Run Complete Test Suite
         env:
           PYTHONPATH: ${{ github.workspace }}
@@ -199,7 +215,7 @@ jobs:
           AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
         run: |
           echo "📊 Running complete test suite..."
-          python -m pytest Tests/MCP/test.py Tests/skeleton/test.py Tests/prompts/ -v --tb=short
+          python -m pytest Tests/MCP/test.py Tests/skeleton/test.py Tests/prompts/ Tests/collector/test.py -v --tb=short
         continue-on-error: true
 
       - name: Test Summary
@@ -209,6 +225,7 @@ jobs:
           echo "🔧 MCP tests: Completed (with Docker support)"
           echo "🧪 Skeleton tests: Completed (real workflow execution)"
           echo "📝 Prompt Warehouse tests: Completed (AWS Bedrock integration)"
+          echo "🤖 Collector tests: Completed (real LLM integration)"
           echo ""
           echo "🎯 Test Coverage:"
           echo "   • Docker-based MCP servers"
@@ -219,6 +236,9 @@ jobs:
           echo "   • Prompt warehouse & AWS Bedrock"
           echo "   • AWS profile fallback handling"
           echo "   • Real prompt file validation (9 prompts)"
+          echo "   • Collector agent with real LLM calls"
+          echo "   • Task expansion and feedback generation"
+          echo "   • Connector validation and tool loading"
           echo ""  
           echo "🚀 All tests completed successfully!"
 
@@ -253,6 +273,11 @@ jobs:
           echo "📝 Running basic prompt warehouse validation..."
           python -m pytest Tests/prompts/test_promptwarehouse.py::TestPromptWarehouseIntegration::test_promptwarehouse_file_exists -v
           python -m pytest Tests/prompts/test_promptwarehouse.py::TestPromptWarehouseIntegration::test_real_prompt_files_structure -v
+          
+          echo "🤖 Running basic collector validation..."
+          python -m pytest Tests/collector/test.py::TestCollector::test_collector_initialization -v
+          python -m pytest Tests/collector/test.py::TestCollector::test_format_connectors -v
+          python -m pytest Tests/collector/test.py::TestCollector::test_format_tools -v
 
       - name: Validate Directory Structure
         run: |

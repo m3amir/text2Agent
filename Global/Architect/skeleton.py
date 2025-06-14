@@ -7,6 +7,8 @@ from typing_extensions import Annotated
 import operator
 from functools import partial
 import json
+import glob
+import uuid
 
 from langgraph.graph import END, StateGraph, START
 from langgraph.graph.message import add_messages
@@ -15,6 +17,7 @@ from Logs.log_manager import LogManager
 from Global.Components.colleagues import Colleague
 from Global.llm import LLM
 from utils.core import setup_logging, sync_logs_to_s3
+from Prompts.promptwarehouse import PromptWarehouse
 
 THRESHOLD_SCORE = 7
 
@@ -42,7 +45,7 @@ except ImportError:
     MCP_AVAILABLE = False
 
 class Skeleton:
-    def __init__(self, user_email: str = ""):
+    def __init__(self, user_email: str = "", agent_run_id: str = None):
         self.log_manager = LogManager(user_email)
         self.user_email = user_email
         self.logger = setup_logging(user_email, 'AI_Skeleton', self.log_manager)
@@ -50,6 +53,37 @@ class Skeleton:
         self.available_tools = {}
         self._session_context = None
         self.guarded = {'microsoft_mail_send_email_as_user', 'microsoft_send_email_as_user'}
+        self.prompt_warehouse = PromptWarehouse(profile_name='m3')
+        
+        # Generate agent_run_id if not provided
+        if agent_run_id is None:
+            agent_run_id = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:8]}"
+        
+        self.agent_run_id = agent_run_id
+
+    def _get_generated_charts(self) -> List[str]:
+        """Get list of generated chart files from the current agent run directory"""
+        charts_base_dir = "tmp/Charts"
+        if not os.path.exists(charts_base_dir) or not self.agent_run_id:
+            return []
+        
+        current_run_dir = os.path.join(charts_base_dir, self.agent_run_id)
+        if not os.path.exists(current_run_dir):
+            return []
+        
+        # Look for chart files
+        chart_patterns = [
+            os.path.join(current_run_dir, "*.png"),
+            os.path.join(current_run_dir, "*.jpg"),
+            os.path.join(current_run_dir, "*.jpeg"),
+            os.path.join(current_run_dir, "*.svg")
+        ]
+        
+        chart_files = []
+        for pattern in chart_patterns:
+            chart_files.extend(glob.glob(pattern))
+        
+        return [os.path.basename(chart_file) for chart_file in chart_files]
 
     async def load_tools(self, tool_names: List[str]):
         if not MCP_AVAILABLE:
@@ -115,14 +149,13 @@ class Skeleton:
         # Emergency stop for loops
         executed_tools = state.get('executed_tools', [])
         if executed_tools and executed_tools.count(executed_tools[-1]) >= 3:
-            result = 'next_tool' if tool_sequence_index < len(current_node_tools) - 1 else 'next_step'
-            return result
+            return 'next_tool' if tool_sequence_index < len(current_node_tools) - 1 else 'next_step'
         
         # Check if we've completed all tools
         if tool_sequence_index >= len(current_node_tools) - 1:
             return 'next_step'
         
-        # Check if the next tool has already been executed to prevent duplicates
+        # Check if the next tool has already been executed
         if tool_sequence_index + 1 < len(current_node_tools):
             next_tool_name = current_node_tools[tool_sequence_index + 1]
             if executed_tools and executed_tools.count(next_tool_name) >= 1:
@@ -131,8 +164,7 @@ class Skeleton:
         has_next_tool = tool_sequence_index < len(current_node_tools) - 1
         
         if colleagues_score >= THRESHOLD_SCORE:
-            result = 'next_tool' if has_next_tool else 'next_step'
-            return result
+            return 'next_tool' if has_next_tool else 'next_step'
         else:
             return 'retry_same'
 
@@ -175,37 +207,8 @@ class Skeleton:
         task = state.get('task', 'complete the task')
         context = self._build_context(state.get('tool_execution_results', []))
         
-        # Special prompting for chart tools
-        if tool_name.startswith('chart_'):
-            prompt = f"""You need to generate a chart. Use the {tool_name} tool for: {task}{context}
-
-CRITICAL: Chart tools require a 'data' parameter with a list of dictionaries. You MUST provide sample data in the correct format.
-
-Examples of proper data formats:
-- For bar/line charts: [{{"category": "Q1", "sales": 120000}}, {{"category": "Q2", "sales": 150000}}]
-- For pie charts: [{{"product": "Product A", "sales": 45000}}, {{"product": "Product B", "sales": 30000}}]
-
-Generate realistic sample data and call the {tool_name} tool with proper arguments including 'data', 'title', and appropriate labels."""
-        elif tool_name.startswith('pdf_'):
-            prompt = f"""You need to generate a PDF report. Use the {tool_name} tool for: {task}{context}
-
-CRITICAL: PDF report tools require 'report_content' parameter with text content. To include charts, use placeholder format {{chart_name}} NOT markdown syntax.
-
-For pdf_generate_report:
-- report_content: Text content with sections and chart placeholders
-- title: Report title  
-- author: Report author
-- include_header: true/false
-- include_footer: true/false
-
-IMPORTANT: To include charts in the report, use simple chart placeholders like {{bar_chart}} or {{pie_chart}} that will match any chart of that type. Do NOT use markdown ![](path) syntax.
-
-Example report_content:
-"# Executive Summary\\n\\nThis report analyzes quarterly sales performance...\\n\\n## Chart Analysis\\n\\n{{bar_chart}}\\n\\nThe chart above shows sales trends...\\n\\n## Conclusions\\n\\nBased on the analysis..."
-
-Call the {tool_name} tool with proper arguments including 'report_content', 'title', and chart placeholders in {{}} format."""
-        else:
-            prompt = f"Use the {tool_name} tool for: {task}{context}\nIMPORTANT: Call the {tool_name} tool with appropriate arguments."
+        # Generate prompt based on tool type
+        prompt = self._generate_prompt(tool_name, task, context)
         
         tool_args = {}
         try:
@@ -228,6 +231,10 @@ Call the {tool_name} tool with proper arguments including 'report_content', 'tit
         
         # Execute tool
         try:
+            # Inject agent_run_id for chart and PDF tools
+            if (tool_name.startswith('chart_') or tool_name.startswith('pdf_')) and tool_args:
+                tool_args['agent_run_id'] = self.agent_run_id
+            
             tool_result = await self._execute_tool(tool_name, tool_args) if tool_args else "No arguments generated"
             new_state['tool_execution_results'] = [{'tool': tool_name, 'args': tool_args, 'result': tool_result}]
             new_state['executed_tools'] = [tool_name]
@@ -236,6 +243,30 @@ Call the {tool_name} tool with proper arguments including 'report_content', 'tit
             new_state['executed_tools'] = [tool_name]
         
         return new_state
+
+    def _generate_prompt(self, tool_name: str, task: str, context: str) -> str:
+        """Generate appropriate prompt based on tool type"""
+        if tool_name.startswith('chart_'):
+            prompt = self.prompt_warehouse.get_prompt('chart')
+            return prompt.format(
+                tool_name=tool_name, 
+                task=task, 
+                context="our rolling 30 day sales is 1000000, our 30 day leads is 100000, our 30 day deals is 100000, our 30 day revenue is 1000000"
+            )
+        elif tool_name.startswith('pdf_'):
+            prompt = self.prompt_warehouse.get_prompt('pdf')
+            return prompt.format(tool_name=tool_name, task=task, context=context)
+        elif 'report' in tool_name.lower():
+            # Get generated charts for report prompts
+            generated_charts = self._get_generated_charts()
+            charts_info = ""
+            if generated_charts:
+                charts_info = f"\n\nGenerated charts available for inclusion in the report:\n- " + "\n- ".join(generated_charts)
+            
+            prompt = self.prompt_warehouse.get_prompt('report')
+            return prompt.format(tool_name=tool_name, task=task, context=context, charts_info=charts_info)
+        else:
+            return f"Use the {tool_name} tool for: {task}{context}\nIMPORTANT: Call the {tool_name} tool with appropriate arguments."
 
     def _build_context(self, tool_results: List[Dict]) -> str:
         if not tool_results:
@@ -256,7 +287,7 @@ Call the {tool_name} tool with proper arguments including 'report_content', 'tit
         if tool_execution_key in approved_tools:
             return False
             
-        # Check if any approval exists for this tool name (more flexible)
+        # Check if any approval exists for this tool name
         for approved_key in approved_tools:
             if approved_key.startswith(f"{tool_name}:"):
                 return False
@@ -317,7 +348,7 @@ Call the {tool_name} tool with proper arguments including 'report_content', 'tit
         from langgraph.checkpoint.memory import MemorySaver
         compiled_graph = self.workflow.compile(checkpointer=MemorySaver())
         
-        # Create PNG
+        # Create PNG visualization
         os.makedirs('graph_images', exist_ok=True)
         png_file = f"graph_images/{task_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
         
@@ -328,8 +359,12 @@ Call the {tool_name} tool with proper arguments including 'report_content', 'tit
         except Exception:
             return compiled_graph, []
 
-async def run_skeleton(user_email: str, blueprint: Dict[str, Any], task_name: str = "workflow"):
-    skeleton = Skeleton(user_email=user_email)
+async def run_skeleton(user_email: str, blueprint: Dict[str, Any], task_name: str = "workflow", agent_run_id: str = None):
+    # Generate agent_run_id if not provided
+    if agent_run_id is None:
+        agent_run_id = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:8]}"
+    
+    skeleton = Skeleton(user_email=user_email, agent_run_id=agent_run_id)
     
     # Extract and load tools
     all_tools = [tool for tools in blueprint.get('node_tools', {}).values() for tool in tools]

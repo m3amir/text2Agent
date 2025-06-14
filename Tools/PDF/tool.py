@@ -9,7 +9,7 @@ import json
 import sys
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Union
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 import glob
 
@@ -40,12 +40,19 @@ class PDFToolkit(Tool):
         self.agent_run_id = agent_run_id
         
         # Ensure reports are saved to root Reports directory with agent run subdirectory
-        project_root = Path(__file__).parent.parent.parent  # Go up from Tools/PDF/ to root
-        self.reports_folder = project_root / "Reports" / self.agent_run_id
+        # Find project root by looking for a marker file or using absolute path
+        current_path = Path(__file__).resolve()
+        project_root = current_path.parent.parent.parent  # Go up from Tools/PDF/ to root
+        
+        # If we end up in Logs directory, go up one more level
+        if project_root.name == "Logs":
+            project_root = project_root.parent
+            
+        self.reports_folder = project_root / "tmp" / "Reports" / self.agent_run_id
         self.reports_folder.mkdir(parents=True, exist_ok=True)
         
         # Charts directory for finding chart files (same agent run)
-        self.charts_folder = project_root / "Charts" / self.agent_run_id
+        self.charts_folder = project_root / "tmp" / "Charts" / self.agent_run_id
         
         # Register PDF generation tool
         self._register_tools()
@@ -64,7 +71,7 @@ class PDFToolkit(Tool):
     
     def _save_pdf(self, filename: str) -> str:
         """Generate a unique filename for the PDF report"""
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         unique_id = str(uuid.uuid4())[:8]
         
         if not filename.endswith('.pdf'):
@@ -231,8 +238,23 @@ class PDFToolkit(Tool):
                            author: str = "Generated Report",
                            page_size: str = "A4",
                            include_header: bool = True,
-                           include_footer: bool = True) -> str:
+                           include_footer: bool = True,
+                           agent_run_id: Optional[str] = None) -> str:
         """Generate a PDF report with chart integration"""
+        
+        # Update agent_run_id and charts folder if provided
+        if agent_run_id is not None and agent_run_id != self.agent_run_id:
+            self.agent_run_id = agent_run_id
+            current_path = Path(__file__).resolve()
+            project_root = current_path.parent.parent.parent
+            
+            # If we end up in Logs directory, go up one more level
+            if project_root.name == "Logs":
+                project_root = project_root.parent
+                
+            self.charts_folder = project_root / "tmp" / "Charts" / self.agent_run_id
+            self.reports_folder = project_root / "tmp" / "Reports" / self.agent_run_id
+            self.reports_folder.mkdir(parents=True, exist_ok=True)
         
         if not PDF_LIBS_AVAILABLE:
             return "❌ PDF libraries not available. Install with: pip install reportlab"
@@ -303,7 +325,7 @@ class PDFToolkit(Tool):
             # Add footer
             if include_footer:
                 story.append(Spacer(1, 30))
-                footer_text = f"Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | {author}"
+                footer_text = f"Generated on {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC | {author}"
                 story.append(Paragraph(footer_text, styles['normal']))
             
             # Build PDF

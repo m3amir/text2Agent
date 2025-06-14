@@ -1,11 +1,14 @@
+
 {
   "mcpServers": {
-    "mcp-server-chart": {
+    "zendesk": {
       "command": "npx",
-      "args": [
-        "-y",
-        "@antv/mcp-server-chart"
-      ]
+      "args": ["-y", "zd-mcp-server"],
+      "env": {
+        "ZENDESK_EMAIL": "${ZENDESK_EMAIL}",
+        "ZENDESK_TOKEN": "${ZENDESK_TOKEN}",
+        "ZENDESK_SUBDOMAIN": "${ZENDESK_SUBDOMAIN}"
+      }
     },
     "zendesk": {
       "command": "npx",
