@@ -75,7 +75,7 @@ jobs:
           echo "Testing pytest collection:"
           python -m pytest Tests/MCP/test.py --collect-only -v || echo "❌ Test collection failed"
           echo "🧪 Running MCP tests (with real Docker integration when available):"
-          python -m pytest Tests/MCP/ -v --tb=short -s || {
+          python -m pytest Tests/MCP/test.py -v --tb=short -s || {
             echo "❌ MCP tests failed, trying individual test file:"
             python -m pytest Tests/MCP/test.py -v --tb=short -s || {
               echo "❌ Individual test file also failed, trying with traceback:"

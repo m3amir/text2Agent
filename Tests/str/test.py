@@ -2,6 +2,7 @@ import sys
 import os
 import pytest
 import json
+import time
 from unittest.mock import patch
 
 # Add project root to path
@@ -80,6 +81,9 @@ class TestSTRComponent:
     def test_knowledge_base_query_real(self, str_component):
         """Test real knowledge base query (requires AWS credentials)"""
         try:
+            # Add delay to prevent throttling
+            time.sleep(2)
+            
             test_query = "create a simple REST API endpoint"
             
             result = str_component.query_knowledge_base(test_query)
@@ -116,11 +120,17 @@ class TestSTRComponent:
     def test_knowledge_base_query_with_session(self, str_component):
         """Test knowledge base query with session ID continuation"""
         try:
+            # Add delay to prevent throttling
+            time.sleep(3)
+            
             # First query
             first_query = "build a user authentication system"
             first_result = str_component.query_knowledge_base(first_query)
             
             if first_result['success'] and first_result['session_id']:
+                # Add delay between queries
+                time.sleep(2)
+                
                 # Second query with session
                 second_query = "add password reset functionality"
                 second_result = str_component.query_knowledge_base(
@@ -148,6 +158,9 @@ class TestSTRComponent:
     def test_format_method_real(self, str_component):
         """Test the _format method with real LLM"""
         try:
+            # Add delay to prevent throttling
+            time.sleep(2)
+            
             # Sample similar tasks data (as would come from knowledge base)
             sample_tasks = [
                 "Task 1: Create REST API with authentication",
@@ -282,6 +295,9 @@ class TestSTRIntegration:
     def test_full_str_workflow(self, str_component):
         """Test the complete STR workflow with real components"""
         try:
+            # Add delay to prevent throttling
+            time.sleep(3)
+            
             # Test initialization
             assert str_component.user_email == "integration@test.com"
             assert str_component.warehouse is not None
@@ -334,6 +350,9 @@ class TestSTRIntegration:
 
     def test_multiple_queries_workflow(self, str_component):
         """Test multiple sequential queries"""
+        # Add initial delay to prevent throttling
+        time.sleep(4)
+        
         queries = [
             "build a REST API",
             "create user authentication", 
@@ -344,6 +363,10 @@ class TestSTRIntegration:
         
         for i, query in enumerate(queries):
             try:
+                # Add delay between queries
+                if i > 0:
+                    time.sleep(3)
+                
                 result = str_component.query_knowledge_base(query, session_id)
                 
                 # Test result structure
