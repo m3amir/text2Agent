@@ -19,6 +19,9 @@ zenpy
 # AWS and cloud services
 boto3
 
+# Database
+psycopg
+
 # Web framework
 flask
 werkzeug
