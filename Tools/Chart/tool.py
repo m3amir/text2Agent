@@ -6,7 +6,7 @@ A comprehensive chart generation tool that creates charts locally using matplotl
 import os
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Union
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 
 # Chart generation libraries
@@ -30,8 +30,15 @@ class ChartToolkit(Tool):
         self.agent_run_id = agent_run_id
         
         # Ensure charts are saved to root Charts directory with agent run subdirectory
-        project_root = Path(__file__).parent.parent.parent  # Go up from Tools/Chart/ to root
-        self.charts_folder = project_root / "Charts" / self.agent_run_id
+        # Find project root by looking for a marker file or using absolute path
+        current_path = Path(__file__).resolve()
+        project_root = current_path.parent.parent.parent  # Go up from Tools/Chart/ to root
+        
+        # If we end up in Logs directory, go up one more level
+        if project_root.name == "Logs":
+            project_root = project_root.parent
+            
+        self.charts_folder = project_root / "tmp" / "Charts" / self.agent_run_id
         self.charts_folder.mkdir(parents=True, exist_ok=True)
         
         # Set up matplotlib style
@@ -67,7 +74,7 @@ class ChartToolkit(Tool):
     
     def _save_chart(self, fig, filename: str) -> str:
         """Save chart to file and return the path"""
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         unique_id = str(uuid.uuid4())[:8]
         
         if not filename.endswith('.png'):
@@ -94,8 +101,32 @@ class ChartToolkit(Tool):
                           y_label: str = "Values",
                           width: int = 10,
                           height: int = 6,
-                          color_scheme: str = "viridis") -> str:
+                          color_scheme: str = "viridis",
+                          # Support alternative parameter names for backward compatibility
+                          x_axis_label: Optional[str] = None,
+                          y_axis_label: Optional[str] = None,
+                          agent_run_id: Optional[str] = None,
+                          **kwargs) -> str:
         """Generate a bar chart"""
+        
+        # Update agent_run_id and charts folder if provided
+        if agent_run_id is not None and agent_run_id != self.agent_run_id:
+            self.agent_run_id = agent_run_id
+            current_path = Path(__file__).resolve()
+            project_root = current_path.parent.parent.parent
+            
+            # If we end up in Logs directory, go up one more level
+            if project_root.name == "Logs":
+                project_root = project_root.parent
+                
+            self.charts_folder = project_root / "tmp" / "Charts" / self.agent_run_id
+            self.charts_folder.mkdir(parents=True, exist_ok=True)
+        
+        # Support alternative parameter names for backward compatibility
+        if x_axis_label is not None:
+            x_label = x_axis_label
+        if y_axis_label is not None:
+            y_label = y_axis_label
         
         try:
             df = pd.DataFrame(data)
@@ -132,8 +163,22 @@ class ChartToolkit(Tool):
                            x_label: str = "X-axis",
                            y_label: str = "Y-axis",
                            width: int = 12,
-                           height: int = 6) -> str:
+                           height: int = 6,
+                           agent_run_id: Optional[str] = None) -> str:
         """Generate a line chart"""
+        
+        # Update agent_run_id and charts folder if provided
+        if agent_run_id is not None and agent_run_id != self.agent_run_id:
+            self.agent_run_id = agent_run_id
+            current_path = Path(__file__).resolve()
+            project_root = current_path.parent.parent.parent
+            
+            # If we end up in Logs directory, go up one more level
+            if project_root.name == "Logs":
+                project_root = project_root.parent
+                
+            self.charts_folder = project_root / "tmp" / "Charts" / self.agent_run_id
+            self.charts_folder.mkdir(parents=True, exist_ok=True)
         
         try:
             df = pd.DataFrame(data)
@@ -163,8 +208,22 @@ class ChartToolkit(Tool):
                           data: List[Dict[str, Union[str, float]]],
                           title: str = "Pie Chart",
                           width: int = 8,
-                          height: int = 8) -> str:
+                          height: int = 8,
+                          agent_run_id: Optional[str] = None) -> str:
         """Generate a pie chart"""
+        
+        # Update agent_run_id and charts folder if provided
+        if agent_run_id is not None and agent_run_id != self.agent_run_id:
+            self.agent_run_id = agent_run_id
+            current_path = Path(__file__).resolve()
+            project_root = current_path.parent.parent.parent
+            
+            # If we end up in Logs directory, go up one more level
+            if project_root.name == "Logs":
+                project_root = project_root.parent
+                
+            self.charts_folder = project_root / "tmp" / "Charts" / self.agent_run_id
+            self.charts_folder.mkdir(parents=True, exist_ok=True)
         
         try:
             df = pd.DataFrame(data)

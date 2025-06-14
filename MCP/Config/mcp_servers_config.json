@@ -1,31 +1,14 @@
+
 {
   "mcpServers": {
-    "server-sequential-thinking": {
+    "zendesk": {
       "command": "npx",
-      "args": [
-        "-y",
-        "@smithery/cli@latest",
-        "run",
-        "@smithery-ai/server-sequential-thinking",
-        "--key",
-        "fd6f7780-545c-4b36-8984-c764d9c9053a"
-      ],
-      "prefix": "sequential",
-      "description": "Advanced sequential reasoning tools"
-    },
-    "ms365": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@softeria/ms-365-mcp-server"
-      ]
-    },
-    "mcp-server-chart": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@antv/mcp-server-chart"
-      ]
+      "args": ["-y", "zd-mcp-server"],
+      "env": {
+        "ZENDESK_EMAIL": "${ZENDESK_EMAIL}",
+        "ZENDESK_TOKEN": "${ZENDESK_TOKEN}",
+        "ZENDESK_SUBDOMAIN": "${ZENDESK_SUBDOMAIN}"
+      }
     },
     "mcp-atlassian": {
       "command": "docker",
@@ -42,15 +25,31 @@
         "ghcr.io/sooperset/mcp-atlassian:latest"
       ],
       "prefix": "atlassian",
-      "description": "MCP server for Atlassian tools (Confluence, Jira)",
-      "env": {
-        "CONFLUENCE_URL": "https://your-company.atlassian.net/wiki",
-        "CONFLUENCE_USERNAME": "your.email@company.com",
-        "CONFLUENCE_API_TOKEN": "your_confluence_api_token",
-        "JIRA_URL": "https://your-company.atlassian.net",
-        "JIRA_USERNAME": "your.email@company.com",
-        "JIRA_API_TOKEN": "your_jira_api_token"
+      "description": "MCP server for Atlassian tools (Confluence, Jira)"
+    }
+  },
+  "local": {
+    "microsoft": {
+      "path": "Tools/Microsoft",
+      "prefix": "microsoft",
+      "description": "Microsoft 365 tools for email, calendar, and SharePoint operations",
+      "credentials": {
+        "tenant_id": "${MICROSOFT_TENANT_ID}",
+        "client_id": "${MICROSOFT_CLIENT_ID}",
+        "client_secret": "${MICROSOFT_CLIENT_SECRET}",
+        "site_url": "${MICROSOFT_SITE_URL}",
+        "email": "${MICROSOFT_EMAIL}"
       }
+    },
+    "chart": {
+      "path": "Tools/Chart",
+      "prefix": "chart",
+      "description": "Local chart generation tools for creating various types of charts and visualizations"
+    },
+    "pdf": {
+      "path": "Tools/PDF",
+      "prefix": "pdf",
+      "description": "PDF report generation tools for creating professional reports with chart integration"
     }
   },
   "_disabled_servers": {
@@ -60,9 +59,9 @@
       "prefix": "google",
       "description": "Google Workspace integration tools - DISABLED due to invalid path",
       "env": {
-        "GOOGLE_CLIENT_ID": "your_client_id",
-        "GOOGLE_CLIENT_SECRET": "your_client_secret",
-        "GOOGLE_REFRESH_TOKEN": "your_refresh_token"
+        "GOOGLE_CLIENT_ID": "${GOOGLE_CLIENT_ID}",
+        "GOOGLE_CLIENT_SECRET": "${GOOGLE_CLIENT_SECRET}",
+        "GOOGLE_REFRESH_TOKEN": "${GOOGLE_REFRESH_TOKEN}"
       }
     },
     "ClickUp": {
@@ -74,8 +73,8 @@
       "prefix": "clickup",
       "description": "MCP server for ClickUp tools - DISABLED until credentials are configured",
       "env": {
-        "CLICKUP_API_KEY": "your-api-key",
-        "CLICKUP_TEAM_ID": "your-team-id",
+        "CLICKUP_API_KEY": "${CLICKUP_API_KEY}",
+        "CLICKUP_TEAM_ID": "${CLICKUP_TEAM_ID}",
         "DOCUMENT_SUPPORT": "true"
       }
     }

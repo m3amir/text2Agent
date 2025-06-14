@@ -4,6 +4,14 @@
 import os, sys, json, asyncio, importlib.util, inspect
 from typing import Dict, Any
 
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    # dotenv not available, skip loading
+    pass
+
 try:
     from mcp.server import Server
     from mcp.server.stdio import stdio_server
@@ -182,7 +190,18 @@ class UniversalToolServer:
         config = self._load_config()
         for tool_name, tool_config in config.get("local", {}).items():
             if tool_name.lower() in class_name.lower():
-                return tool_config.get("credentials")
+                credentials = tool_config.get("credentials")
+                if credentials:
+                    # Substitute environment variables
+                    processed_creds = {}
+                    for key, value in credentials.items():
+                        if isinstance(value, str) and value.startswith("${") and value.endswith("}"):
+                            env_var = value[2:-1]  # Remove ${ and }
+                            processed_creds[key] = os.environ.get(env_var, value)
+                        else:
+                            processed_creds[key] = value
+                    return processed_creds
+                return None
         return None
     
     async def _load_remote_tools(self):
