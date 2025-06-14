@@ -25,6 +25,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pytest pytest-asyncio pytest-mock
+          
+          # Install MCP dependencies explicitly
+          echo "🔧 Installing MCP dependencies..."
+          pip install mcp mcp-server langchain-mcp-adapters
+          
+          # Verify MCP installation
+          python -c "import mcp; print('✅ MCP package installed successfully')" || echo "❌ MCP package installation failed"
 
       - name: Setup Docker (for MCP tests)
         run: |
@@ -58,8 +65,29 @@ jobs:
           echo "Testing MCP imports:"
           python -c "import sys; sys.path.insert(0, '.'); from MCP.tool_mcp_server import UniversalToolServer; print('✅ UniversalToolServer import successful')" || echo "❌ UniversalToolServer import failed"
           python -c "import sys; sys.path.insert(0, '.'); from MCP.langchain_converter import convert_mcp_to_langchain; print('✅ LangChain converter import successful')" || echo "❌ LangChain converter import failed"
+          echo "🔍 Debugging test collection:"
+          echo "Current directory: $(pwd)"
+          echo "PYTHONPATH: $PYTHONPATH"
+          echo "Tests/MCP directory contents:"
+          ls -la Tests/MCP/
+          echo "Checking if test file can be imported:"
+          python -c "import sys; sys.path.insert(0, '.'); import Tests.MCP.test; print('✅ Test file imports successfully')" || echo "❌ Test file import failed"
+          echo "Testing pytest collection:"
+          python -m pytest Tests/MCP/test.py --collect-only -v || echo "❌ Test collection failed"
           echo "🧪 Running MCP tests (with real Docker integration when available):"
-          python -m pytest Tests/MCP/ -v --tb=short -s
+          python -m pytest Tests/MCP/ -v --tb=short -s || {
+            echo "❌ MCP tests failed, trying individual test file:"
+            python -m pytest Tests/MCP/test.py -v --tb=short -s || {
+              echo "❌ Individual test file also failed, trying with traceback:"
+              python -m pytest Tests/MCP/test.py -v --tb=long -s || {
+                echo "❌ All MCP test attempts failed"
+                echo "🔍 Final debugging - checking Python can import test modules:"
+                python -c "import sys; sys.path.insert(0, '.'); import Tests.MCP.test; print('✅ Test module imports')" || echo "❌ Test import failed"
+                python -c "import pytest; print('✅ Pytest available')" || echo "❌ Pytest import failed"
+                exit 1
+              }
+            }
+          }
 
       - name: Run Skeleton Workflow Tests
         env:
@@ -198,6 +226,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pytest pytest-asyncio pytest-mock
+          
+          # Install MCP dependencies explicitly
+          echo "🔧 Installing MCP dependencies..."
+          pip install mcp mcp-server langchain-mcp-adapters
+          
+          # Verify MCP installation
+          python -c "import mcp; print('✅ MCP package installed successfully')" || echo "❌ MCP package installation failed"
 
       - name: Run Configuration Tests Only
         run: |
