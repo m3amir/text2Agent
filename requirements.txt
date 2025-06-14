@@ -20,7 +20,7 @@ zenpy
 boto3
 
 # Database
-psycopg
+psycopg2-binary
 
 # Web framework
 flask
