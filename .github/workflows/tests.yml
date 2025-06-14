@@ -55,8 +55,9 @@ jobs:
           echo "🔍 MCP Config check:"
           echo "MCP directory: $(ls -la MCP/ | head -5)"
           echo "MCP Config: $(ls -la MCP/Config/ | head -5)"
-          echo "Testing MCP configuration imports:"
-          python -c "import sys; sys.path.insert(0, '.'); from MCP.Config.mcp_config import mcp_config; print('✅ MCP config import successful')" || echo "❌ MCP config import failed"
+          echo "Testing MCP imports:"
+          python -c "import sys; sys.path.insert(0, '.'); from MCP.tool_mcp_server import UniversalToolServer; print('✅ UniversalToolServer import successful')" || echo "❌ UniversalToolServer import failed"
+          python -c "import sys; sys.path.insert(0, '.'); from MCP.langchain_converter import convert_mcp_to_langchain; print('✅ LangChain converter import successful')" || echo "❌ LangChain converter import failed"
           echo "🧪 Running MCP tests (with real Docker integration when available):"
           python -m pytest Tests/MCP/ -v --tb=short -s
 
