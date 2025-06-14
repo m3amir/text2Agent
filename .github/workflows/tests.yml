@@ -26,13 +26,21 @@ jobs:
           pip install -r requirements.txt
           pip install pytest pytest-asyncio pytest-mock
 
-      - name: Install Docker (for MCP tests)
+      - name: Setup Docker (for MCP tests)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y docker.io
-          sudo systemctl start docker
-          sudo usermod -aG docker $USER
-          echo "Docker installed and configured"
+          echo "🐳 Setting up Docker for MCP tests..."
+          
+          # Docker is pre-installed on GitHub Actions runners
+          docker --version
+          docker info
+          
+          # Ensure Docker service is running
+          sudo systemctl start docker || echo "Docker already running"
+          
+          # Test Docker functionality
+          docker run --rm hello-world
+          
+          echo "✅ Docker is ready for MCP tests"
 
       - name: Run MCP Tests
         env:
