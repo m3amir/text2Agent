@@ -2,9 +2,9 @@ name: Test All Components
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ Staging ]
   pull_request:
-    branches: [ main, master ]
+    branches: [ Staging ]
 
 jobs:
   tests:
