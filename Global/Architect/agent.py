@@ -82,29 +82,18 @@ class State(TypedDict):
 SYSTEM_PROMPT="""
 You are **Architect**, a senior LangGraph‑design assistant.
 
-## Your mission
+Take a set of tools together with a plain‑language agent_goal and create a LangGraph definition (nodes + edges).
+Return a single JSON object that fully describes the workflow.
 
-Take a set of tools together with a plain‑language *agent\_goal* and create a *LangGraph definition* (nodes + edges).
-Return a **single JSON object** that fully describes the workflow.
+⮞ Important formatting constraints
 
-⮞ **Important formatting constraints**
-
-* The `edges` array must contain **node‑to‑node pairs expressed as tuples**, e.g. `("A", "B")`.
-  (Yes, this technically violates strict JSON, but the downstream parser expects this exact literal syntax.)
-* The output may omit the implicit `START` and `END` sentinel nodes; they will be added internally.
+The output may omit the implicit START and END sentinel nodes.
 
 Input
 
-```
-1. `agent_goal` – a short, plain‑language description of what the agent should accomplish.
-2. An initial JSON snippet showing a *similar* output (optional).
+agent_goal – a short, plain‑language description of what the agent should accomplish.
+The following is a valid example to guide your output:
 
-Example
-```
-
-Return **only** the keys shown below – no comments or extra keys:
-
-```json
 {{
   "nodes": ["Microsoft", "Colleagues_Microsoft", "finish"],
   "edges": [("Microsoft", "Colleagues_Microsoft")],
@@ -123,44 +112,35 @@ Return **only** the keys shown below – no comments or extra keys:
     ]
   }}
 }}
-```
+Rules
+Tools and Nodes
+Group tools under their platform node (e.g., Microsoft, Slack, Github).
 
-Output rules
+After each tool invocation, route control to the corresponding Colleagues node (e.g., ColleaguesMicrosoft).
 
-```
-### Tools and Nodes
-* Group tools under their **platform node** (e.g., `Microsoft`, `Slack`, `Github`).
-* After each tool invocation, route control to the corresponding **Colleagues** node (e.g., `Colleagues_Microsoft`).
+Colleagues Nodes
+Each Colleagues* node must provide exactly three options:
 
-### Colleagues nodes
-Inside each `Colleagues_*` node you must expose exactly three routing options:
+retry_same: go back to the prior tool node (if error/ambiguity).
 
-| Key          | Destination                     | When to choose                                                                    |
-|--------------|---------------------------------|-----------------------------------------------------------------------------------|
-| `retry_same` | the tool node you just left     | Use when the previous step failed or returned ambiguous data (transient issue).   |
-| `next_tool`  | the same tool node              | Use when the previous step succeeded but another tool in that node is required.   |
-| `next_step`  | the next logical node or finish | Use when work in the current platform is complete.                                |
+next_tool: return to the same node (if another tool is needed).
 
-The canonical flow for *every* step is:  
-`<Tool Node>` → `<Colleagues Node>` → decision (`retry_same | next_tool | next_step`).
+next_step: advance to the next logical node or finish.
 
-### Finish
-`finish` is a mandatory terminal node; once reached the workflow ends.
+Flow
+<Tool Node> → <Colleagues Node> → decision (retry_same | next_tool | next_step).
 
-Style rules
-~~~~~~~~~~~
-* **JSON output only** – no prose outside the braces.
-* Use **snake_case** *for keys only*; node names may retain original casing.
-* Do **not** wrap the final JSON in Markdown back‑ticks.
+Finish
+finish is required; it marks the end of the workflow.
 
-Helpful LangGraph reminders (for your reference only – do not include in the JSON)
-```
+Style
+Output must be JSON
 
-* Nodes are added with `add_node(name, func)`.
-* Straight edges: `add_edge(source, target)`.
-* Conditional routing: `add_conditional_edges(source, router, mapping)`.
+The edges array must contain node‑to‑node pairs expressed as tuples within a list, e.g. [("A", "B"), ....].
 
-The goal of the agent you will define is {goal}
+Use snake_case for keys only; keep node names in TitleCase or camelCase if needed.
+
+The task description is: {goal}
 """
 
 
@@ -183,68 +163,25 @@ class Architect:
         ]
         return state
 
-    async def analyse_tools(self, state: State) -> State:
-        """Cluster tools and propose logical workflow components via the LLM."""
-        llm = LLM()  # Initialise LLM helper
-
-        # Build descriptive prompt listing each tool for the LLM to analyse
-        prompt = (SYSTEM_PROMPT.format(goal=f"{state['input']}\n\n"),
-            "Here is the list of available tools (name – description):\n"
-            + "\n".join(f"- {t['name']}: {t['description']}" for t in state["tools"])
-        )
-        # Try look at langgraph documentation to explain the definition of a logical node
-
-        # Use the Pydantic model to coerce/validate the LLM output
-        response = llm.formatted(prompt, ToolAnalysisResponse)
-        state["draft_workflow"] = response.workflow_components  # Persist result
-        return state
-
     async def draft_workflow(self, state: State) -> State:
         """Convert components into LangGraph skeleton unless waiting for answers."""
         # Skip if already awaiting or have collected human answers
+        print(state["draft_workflow"])
         if state["feedback_questions"] or state["answered_questions"]:
             return state
 
         llm = LLM()
-        prompt = (
+        prompt = (SYSTEM_PROMPT.format(goal=f"{state['input']}\n\n"),
             "Design a LangGraph based on these components. Return JSON "
             "describing nodes, edges, and conditional routing.\n\nComponents:\n",
             f"{state['draft_workflow']}",
             "Ensure that you are using the appropriate inputs for each tool you have access to.",
         )
         response = llm.formatted(prompt, WorkflowDraftResponse)
-        state["draft_workflow"] = response.graph_skeleton  # Overwrite with skeleton
+        state["draft_workflow"] = response.graph_skeleton  # Overwrite with agent skeleton
+        print(state["draft_workflow"])
         return state
-
-    async def generate_config(self, state: State) -> State:
-        """Ask the LLM to produce a JSON for the designed LangGraph."""
-        llm = LLM()
-        prompt = (
-            "Convert the following LangGraph design spec into a JSON format.\n"
-            "It must import all necessary nodes and edges and compile without modification.\n\n"
-            f"Spec:\n{state['draft_workflow']}"
-        )
-        response = llm.formatted(prompt, LangGraphCodeResponse)
-        state["langgraph_architecture"] = response.code  # Save code for final output
-        return state
-
-    # def human_approval(self, state: State) -> State:
-    #     """Interrupt execution to retrieve answers to feedback questions if needed."""
-    #     # If answers already collected, continue without new interrupt
-    #     if state["answered_questions"]:
-    #         return state
-
-    #     # Request answers from the human user
-    #     answered = interrupt({"questions": state["feedback_questions"]})
-
-    #     # Validate structure of the returned dict and persist if non‑empty
-    #     if isinstance(answered, dict) and "questions" in answered:
-    #         non_empty = [a for a in answered["questions"].values() if a and str(a).strip()]
-    #         if non_empty and not state["answered_questions"]:
-    #             state["answered_questions"].append(answered["questions"])
-    #             state["reviewed"] = True  # Mark reviewed so we can exit loop
-    #     return state
-
+    
     def output_config(self, state: State) -> State:
         """Final node – simply return the enriched state (code is printed in __main__)."""
         print("✅ Architect approved – returning code.")
@@ -258,29 +195,13 @@ class Architect:
 
         # Register node functions
         workflow.add_node("collect_tools", self.collect_tools)
-        workflow.add_node("analyse_tools", self.analyse_tools)
         workflow.add_node("design_workflow", self.draft_workflow)
-        workflow.add_node("generate_config", self.generate_config)
-        # workflow.add_node("human_approval", self.human_approval)
         workflow.add_node("output_config", self.output_config)
 
         # Define linear progression
         workflow.add_edge(START, "collect_tools")
-        workflow.add_edge("collect_tools", "analyse_tools")
-        workflow.add_edge("analyse_tools", "design_workflow")
-        workflow.add_edge("design_workflow", "generate_config")
-        # workflow.add_edge("generate_config", "human_approval")
-
-        # # Conditional routing based on whether human answers are now present
-        # def route_after_approval(s: State):
-        #     return "output_config" if s["reviewed"] else "analyse_tools"
-
-        # workflow.add_conditional_edges(
-        #     "human_approval",
-        #     route_after_approval,
-        #     {"analyse_tools": "analyse_tools", "output_config": "output_config"},
-        # )
-
+        workflow.add_edge("collect_tools", "design_workflow")
+        workflow.add_edge("design_workflow", "output_config")
         workflow.add_edge("output_config", END)  # Terminate graph
 
         # Compile graph with a simple in‑memory checkpoint mechanism
@@ -329,6 +250,3 @@ if __name__ == "__main__":
 
     # Execute the graph asynchronously and capture final state
     result = asyncio.run(graph.ainvoke(initial_state, config=config))
-
-    # Pretty‑print the generated LangGraph Python code
-    print(result["langgraph_architecture"])
