@@ -21,129 +21,59 @@ except ImportError:
 class Test:
     def __init__(self, secret_name="test_", user_email="amir@m3labs.co.uk", recipient="info@m3labs.co.uk", task_description="", agent_run_id=None, log_manager=None):
         """
-        Initialize test with configurable parameters
+        Initialize Test class
         
         Args:
             secret_name: Name of the AWS secret to retrieve credentials from
-            user_email: User email for skeleton initialization
-            recipient: Default email recipient for tests
-            task_description: Description of the task to guide tool testing questions
-            agent_run_id: Agent run ID for directory naming (generates one if not provided)
-            log_manager: Optional LogManager instance for organized directory structure
+            user_email: User's email address
+            recipient: Email recipient for testing
+            task_description: Description of the testing task
+            agent_run_id: Unique identifier for this test run
+            log_manager: Optional LogManager instance for organized logging
         """
         self.secret_name = secret_name
         self.user_email = user_email
         self.recipient = recipient
         self.task_description = task_description
-        self.test_results = {}  # Dict with tool_name as key and formatted string response as value
-        self.credentials = None
-        self.tool_questions = {}  # Store generated questions for each tool
-        self.prompt_warehouse = PromptWarehouse('m3')
         self.log_manager = log_manager
         
-        # Set up logging
-        self.logger = setup_logging(user_email, 'Test_System', self.log_manager)
+        # No longer need to store credentials - MCP server handles this
+        
+        # Set up agent run ID
+        if agent_run_id:
+            self.agent_run_id = agent_run_id
+        else:
+            from datetime import datetime
+            import uuid
+            self.agent_run_id = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:8]}"
+        
+        # Initialize logging
+        self.logger = setup_logging(user_email, "Test_System", log_manager)
         self.logger.info("Initializing Test System...")
         self.logger.info(f"Secret: {secret_name}")
         self.logger.info(f"Task: {task_description}")
         self.logger.info("System ready!")
-
-        # Use provided agent_run_id or generate one
-        if agent_run_id is None:
-            agent_run_id = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:8]}"
         
-        self.agent_run_id = agent_run_id
+        # Set up test results storage
+        self.test_results = {}
+        self.tool_questions = {}
         
-        # Set up test results directory following the same pattern as Charts/Reports
-        current_path = Path(__file__).resolve()
-        project_root = current_path.parent.parent.parent  # Go up from Global/Testing/ to root
-        
-        # If we end up in Logs directory, go up one more level
-        if project_root.name == "Logs":
-            project_root = project_root.parent
-            
-        self.test_results_folder = project_root / "tmp" / "Tests" / self.agent_run_id
+        # Create results folder
+        self.test_results_folder = Path("tmp/Tests") / self.agent_run_id
         self.test_results_folder.mkdir(parents=True, exist_ok=True)
         
-        # Available tools for testing
-        self.available_tools = ['microsoft_mail_send_email_as_user']
-
-    def get_credentials(self):
-        """Retrieve and process credentials from AWS Secrets Manager"""
-        if self.credentials:
-            return self.credentials
-            
-        self.logger.info(f"Retrieving credentials from secret: {self.secret_name}")
+        # Initialize prompt warehouse (using the correct import already at top of file)
+        self.prompt_warehouse = PromptWarehouse('m3')
         
-        try:
-            secret_data = get_secret(self.secret_name)
-            
-            # Handle flat MICROSOFT_ structure
-            if any(key.startswith('MICROSOFT_') for key in secret_data.keys()):
-                microsoft_creds = {}
-                for key, value in secret_data.items():
-                    if key.startswith('MICROSOFT_'):
-                        clean_key = key.replace('MICROSOFT_', '').lower()
-                        microsoft_creds[clean_key] = value
-                
-                self.credentials = {'microsoft': microsoft_creds}
-                self.logger.info(f"Retrieved Microsoft credentials - Email: {microsoft_creds.get('email', 'N/A')}")
-                return self.credentials
-                
-            # Handle nested structure
-            elif 'microsoft' in secret_data:
-                self.credentials = secret_data
-                self.logger.info(f"Retrieved nested credentials")
-                return self.credentials
-            else:
-                self.logger.warning(f"No Microsoft credentials found in secret")
-                return None
-                
-        except Exception as e:
-            self.logger.error(f"Failed to retrieve credentials: {e}")
-            return None
-
-    async def _generate_tool_question(self, skeleton, tool_name):
-        """Generate a specific question for testing this tool based on task description"""
-        try:
-            if not self.task_description:
-                return f"How should the {tool_name} tool be tested effectively?"
-            
-            llm = LLM()
-            model = llm.get_model()
-            
-            tool = skeleton.available_tools[tool_name]
-            tool_description = self._get_tool_description(tool)
-            
-            prompt = self.prompt_warehouse.get_prompt("tool_question").format(
-                task_description=self.task_description,
-                tool_name=tool_name,
-                tool_description=tool_description
-            )
-            response = model.invoke(prompt)
-            question = response.content.strip()
-            
-            # Store the question for this tool
-            self.tool_questions[tool_name] = question
-            self.logger.info(f"Generated question for {tool_name}: {question}")
-            
-            return question
-            
-        except Exception as e:
-            self.logger.error(f"Error generating question for {tool_name}: {e}")
-            default_question = f"How should the {tool_name} tool be tested for the task: {self.task_description}?"
-            self.tool_questions[tool_name] = default_question
-            return default_question
+        # Available tools for testing - focusing on email only
+        self.available_tools = [
+            'microsoft_mail_send_email_as_user'
+        ]
 
     async def test_tools(self, tools_to_test=None):
-        """Test specified tools with retrieved credentials"""
+        """Test specified tools using MCP server credential handling"""
         if not tools_to_test:
             tools_to_test = self.available_tools
-            
-        # Ensure credentials are available
-        if not self.get_credentials():
-            self.logger.error("Cannot proceed without valid credentials")
-            return False
 
         self.logger.info(f"Testing {len(tools_to_test)} tools with secret: {self.secret_name}")
         
@@ -180,14 +110,46 @@ class Test:
             
         return True
 
+    async def _generate_tool_question(self, skeleton, tool_name):
+        """Generate a specific question for testing this tool based on task description"""
+        try:
+            if not self.task_description:
+                return f"How should the {tool_name} tool be tested effectively?"
+            
+            llm = LLM()
+            model = llm.get_model()
+            
+            tool = skeleton.available_tools[tool_name]
+            tool_description = self._get_tool_description(tool)
+            
+            prompt = self.prompt_warehouse.get_prompt("tool_question").format(
+                task_description=self.task_description,
+                tool_name=tool_name,
+                tool_description=tool_description
+            )
+            response = model.invoke(prompt)
+            question = response.content.strip()
+            
+            # Store the question for this tool
+            self.tool_questions[tool_name] = question
+            self.logger.info(f"Generated question for {tool_name}: {question}")
+            
+            return question
+            
+        except Exception as e:
+            self.logger.error(f"Error generating question for {tool_name}: {e}")
+            default_question = f"How should the {tool_name} tool be tested for the task: {self.task_description}?"
+            self.tool_questions[tool_name] = default_question
+            return default_question
+
     async def _test_single_tool(self, skeleton, tool_name):
         """Test a single tool with generated arguments"""
         try:
             # Generate test arguments
             args = await self._generate_tool_args(skeleton, tool_name)
             
-            # Add secret name for credential lookup
-            if 'microsoft' in tool_name.lower():
+            # Add secret name for credential lookup for Microsoft tools
+            if 'microsoft' in tool_name.lower() or 'mail' in tool_name.lower():
                 args['secret_name'] = self.secret_name
                 
             self.logger.info(f"Generated args: {args}")

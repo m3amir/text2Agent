@@ -9,6 +9,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 from Global.Collector.agent import Collector
 from Global.Architect.skeleton import Skeleton
+from utils.core import get_user_credentials_by_email, get_user_secret_name_by_email, get_secret
 
 class PipelineBuilder:
     """Simple pipeline builder that combines collector and architect"""
@@ -16,6 +17,14 @@ class PipelineBuilder:
     def __init__(self, agent_description: str, user_email: str = ""):
         self.agent_description = agent_description
         self.user_email = user_email
+        
+        # Initialize user credentials
+        self.user_credentials = None
+        self.user_secret_name = None
+        
+        # Load user credentials if email provided
+        if user_email:
+            self._load_user_credentials()
         
         # Initialize components
         self.collector = Collector(agent_description, user_email)
@@ -27,6 +36,74 @@ class PipelineBuilder:
         self.blueprint = None
         self.workflow = None
         
+    def _load_user_credentials(self):
+        """Load user-specific credentials from secret manager"""
+        try:
+            print(f"🔐 Loading credentials for user: {self.user_email}")
+            
+            # For now, use "test_" as the secret name
+            self.user_secret_name = "test_"
+            print(f"🔑 Using test secret name: {self.user_secret_name}")
+            
+            # Retrieve credentials directly from secret manager
+            self.user_credentials = get_secret(self.user_secret_name)
+            if self.user_credentials:
+                print(f"✅ Successfully loaded credentials for {self.user_email}")
+                print(f"🔑 Secret name: {self.user_secret_name}")
+                
+                # Print credential structure (safely)
+                print("\n📋 CREDENTIAL STRUCTURE:")
+                print("=" * 50)
+                self._print_credential_structure(self.user_credentials, indent=0)
+                print("=" * 50)
+                
+            else:
+                print(f"❌ Failed to load credentials for {self.user_email}")
+                
+        except Exception as e:
+            print(f"❌ Error loading user credentials: {e}")
+            self.user_credentials = None
+            self.user_secret_name = None
+    
+    def _print_credential_structure(self, data, indent=0):
+        """Safely print credential structure without exposing sensitive values"""
+        spaces = "  " * indent
+        
+        if isinstance(data, dict):
+            for key, value in data.items():
+                if isinstance(value, dict):
+                    print(f"{spaces}{key}: (nested object)")
+                    self._print_credential_structure(value, indent + 1)
+                elif isinstance(value, list):
+                    print(f"{spaces}{key}: (list with {len(value)} items)")
+                    for i, item in enumerate(value):
+                        print(f"{spaces}  [{i}]:")
+                        self._print_credential_structure(item, indent + 2)
+                else:
+                    # For sensitive values, show type and length/pattern instead of actual value
+                    if any(sensitive in key.lower() for sensitive in ['password', 'secret', 'key', 'token']):
+                        if isinstance(value, str) and len(value) > 0:
+                            print(f"{spaces}{key}: *** (string, {len(value)} chars)")
+                        else:
+                            print(f"{spaces}{key}: *** ({type(value).__name__})")
+                    else:
+                        # Safe to show non-sensitive values
+                        print(f"{spaces}{key}: {value}")
+        elif isinstance(data, list):
+            for i, item in enumerate(data):
+                print(f"{spaces}[{i}]:")
+                self._print_credential_structure(item, indent + 1)
+        else:
+            print(f"{spaces}Value: {data}")
+    
+    def get_user_credentials(self) -> Optional[Dict[str, Any]]:
+        """Get the loaded user credentials"""
+        return self.user_credentials
+    
+    def get_user_secret_name(self) -> Optional[str]:
+        """Get the user's secret name"""
+        return self.user_secret_name
+
     async def build_pipeline(self) -> Dict[str, Any]:
         """Build the complete pipeline"""
         try:
@@ -34,20 +111,24 @@ class PipelineBuilder:
             await self._run_collector()
             
             # Phase 2: Build skeleton workflow
-            # await self._run_skeleton()
+            await self._run_skeleton()
             
             return {
                 'success': True,
                 'connectors': self.connectors,
                 'tools': self.tools,
                 'blueprint': self.blueprint,
-                'workflow': self.workflow
+                'workflow': self.workflow,
+                'user_credentials_loaded': self.user_credentials is not None,
+                'user_secret_name': self.user_secret_name
             }
             
         except Exception as e:
             return {
                 'success': False,
-                'error': str(e)
+                'error': str(e),
+                'user_credentials_loaded': self.user_credentials is not None,
+                'user_secret_name': self.user_secret_name
             }
     
     async def _run_collector(self):
@@ -60,7 +141,8 @@ class PipelineBuilder:
             'feedback_questions': [],
             'answered_questions': [],
             'reviewed': False,
-            'connector_tools': {}
+            'connector_tools': {},
+            'user_secret_name': self.user_secret_name  # Pass secret name to workflow
         }
         
         thread_id = f"collector_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -117,7 +199,8 @@ class PipelineBuilder:
                 ("gather_input", "process_with_tools"),
                 ("process_with_tools", "provide_output")
             ],
-            "node_tools": {}
+            "node_tools": {},
+            "user_secret_name": self.user_secret_name  # Include secret name in blueprint
         }
         
         # Assign tools to processing node

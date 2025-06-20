@@ -107,6 +107,7 @@ class MicrosoftToolkit:
     async def _send_email_as_user_async(self, sender_email: str, recipients: List[str], subject: str, body: str,
                                        body_type: str = "HTML", cc_emails: List[str] = None, bcc_emails: List[str] = None,
                                        attachments: List[Dict] = None) -> str:
+        
         try:
             if not await self._authenticate():
                 return json.dumps({"error": "Authentication failed", "success": False})

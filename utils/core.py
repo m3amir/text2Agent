@@ -530,3 +530,48 @@ def list_database_structure():
     except Exception as e:
         logger.error(f"❌ Failed to list database structure: {e}")
         raise
+
+def get_user_secret_name_by_email(email: str) -> Optional[str]:
+    """Get user-specific secret name from AWS Secrets Manager based on email"""
+    try:
+        # First try to get tenant-specific secret name
+        tenant_domain = get_tenant_domain_by_email(email)
+        if tenant_domain:
+            # Use tenant domain as secret name pattern
+            secret_name = f"{tenant_domain}-credentials"
+            logger.info(f"✅ Generated secret name for {email}: {secret_name}")
+            return secret_name
+        
+        # Fallback: use user uid as secret name
+        user_uid = get_user_uid_by_email(email)
+        if user_uid:
+            secret_name = f"user-{user_uid}-credentials"
+            logger.info(f"✅ Generated fallback secret name for {email}: {secret_name}")
+            return secret_name
+        
+        # Ultimate fallback: use email domain
+        domain = email.split('@')[1].replace('.', '-')
+        secret_name = f"{domain}-credentials"
+        logger.warning(f"⚠️ Using domain-based secret name for {email}: {secret_name}")
+        return secret_name
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to get secret name for {email}: {e}")
+        return None
+
+def get_user_credentials_by_email(email: str) -> Optional[Dict[str, Any]]:
+    """Get user-specific credentials from AWS Secrets Manager"""
+    try:
+        secret_name = get_user_secret_name_by_email(email)
+        if not secret_name:
+            logger.error(f"❌ Could not determine secret name for {email}")
+            return None
+        
+        logger.info(f"🔐 Retrieving credentials for {email} from secret: {secret_name}")
+        credentials = get_secret(secret_name)
+        logger.info(f"✅ Successfully retrieved credentials for {email}")
+        return credentials
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to retrieve credentials for {email}: {e}")
+        return None
