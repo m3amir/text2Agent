@@ -26,6 +26,33 @@ class PromptWarehouse:
         self.client.create_prompt_version(promptIdentifier=response['id'])
         return response['id']
 
+    def update_prompt(self, prompt_id: str, name: str, description: str, prompt: str):
+        """Update an existing prompt with new content"""
+        try:
+            # Update the prompt
+            self.client.update_prompt(
+                promptIdentifier=prompt_id,
+                name=name,
+                description=description,
+                defaultVariant=name,
+                variants=[{
+                    "name": name,
+                    "templateConfiguration": {
+                        "text": {
+                            "inputVariables": [],
+                            "text": prompt,
+                        }
+                    },
+                    "templateType": "TEXT",
+                }]
+            )
+            # Create a new version
+            self.client.create_prompt_version(promptIdentifier=prompt_id)
+            return True
+        except Exception as e:
+            print(f"Error updating prompt {name}: {e}")
+            return False
+
     def sync_prompts_from_files(self):
         """Sync prompts from all prompt.py files in subdirectories"""
         prompts_dir = os.path.dirname(__file__)
@@ -41,7 +68,7 @@ class PromptWarehouse:
                 spec.loader.exec_module(prompt_module)
                 
                 subdir_name = os.path.basename(root)
-                existing_prompts = self._get_existing_prompts()
+                existing_prompts = self._get_existing_prompts_with_ids()
                 
                 # Find all variables ending with '_prompt'
                 for attr_name in dir(prompt_module):
@@ -50,15 +77,25 @@ class PromptWarehouse:
                         
                         if isinstance(prompt_content, str):
                             prompt_name = attr_name[:-7]  # Just the variable name without "_prompt"
+                            description = f"Prompt from {subdir_name}/{attr_name}"
                             
                             if prompt_name not in existing_prompts:
-                                self.create_prompt(prompt_name, f"Prompt from {subdir_name}/{attr_name}", prompt_content)
+                                self.create_prompt(prompt_name, description, prompt_content)
                                 print(f"✓ Created: {prompt_name}")
                             else:
-                                print(f"- Exists: {prompt_name}")
+                                # Check if content has changed
+                                current_content = self.get_prompt(prompt_name)
+                                if current_content and current_content.strip() != prompt_content.strip():
+                                    prompt_id = existing_prompts[prompt_name]
+                                    if self.update_prompt(prompt_id, prompt_name, description, prompt_content):
+                                        print(f"✓ Updated: {prompt_name}")
+                                    else:
+                                        print(f"❌ Failed to update: {prompt_name}")
+                                else:
+                                    print(f"- Unchanged: {prompt_name}")
                                 
             except Exception as e:
-                print(f"✗ Error in {root}: {e}")
+                print(f"❌ Error in {root}: {e}")
 
     def list_prompts(self):
         """List all prompts in a nice format"""
@@ -71,7 +108,7 @@ class PromptWarehouse:
         output = ["=" * 60, f"PROMPT WAREHOUSE ({len(prompts)} prompts)", "=" * 60]
         
         for prompt in prompts:
-            output.append(f"📝 {prompt['name']}")
+            output.append(f"{prompt['name']}")
             output.append(f"   {prompt['description']}")
             output.append(f"   Updated: {prompt['updatedAt'].strftime('%Y-%m-%d %H:%M')}")
             output.append(f"   ID: {prompt['id']}")
@@ -106,12 +143,13 @@ class PromptWarehouse:
         response = self.client.list_prompts(maxResults=100)
         return {prompt['name'] for prompt in response.get("promptSummaries", [])}
 
+    def _get_existing_prompts_with_ids(self):
+        """Get dict of existing prompt names to their IDs"""
+        response = self.client.list_prompts(maxResults=100)
+        return {prompt['name']: prompt['id'] for prompt in response.get("promptSummaries", [])}
+
 
 # # Run sync
 # warehouse = PromptWarehouse('m3')
 # results = warehouse.sync_prompts_from_files()
 # print(warehouse.list_prompts())
-
-# # # Example: Get a specific prompt
-# prompt = warehouse.get_prompt('collector')
-# print(prompt)

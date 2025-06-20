@@ -20,11 +20,6 @@ except ImportError:
 
 class MicrosoftToolkit:
     def __init__(self, credentials: Dict[str, str]):
-        print("🔥 MICROSOFT TOOL INIT CALLED!")
-        print("🔥 MICROSOFT TOOL INIT CALLED!")
-        print("🔥 MICROSOFT TOOL INIT CALLED!")
-        print("🔥 MICROSOFT TOOL INIT CALLED!")
-
         self.tenant_id = credentials.get('tenant_id')
         self.client_id = credentials.get('client_id') 
         self.client_secret = credentials.get('client_secret')
@@ -33,7 +28,6 @@ class MicrosoftToolkit:
         self.access_token = None
         self.site_id = None
         self.drives = {}
-        
         
         if not all([self.tenant_id, self.client_id, self.client_secret]):
             raise ValueError("Missing required credentials: tenant_id, client_id, client_secret")
@@ -89,14 +83,21 @@ class MicrosoftToolkit:
         This tool automatically formats plain text into beautiful HTML using AI if the body_type is HTML.
         It handles authentication, email composition, and delivery through Microsoft 365.
         
+        IMPORTANT USAGE RULES:
+        - ONLY use real, valid email addresses - DO NOT create fake emails
+        - For testing: use only provided email addresses (sender and recipient)
+        - AVOID attachments unless absolutely necessary - they require complex formatting
+        - Set body_type to "HTML" for better formatting
+        - Keep email content professional and realistic
+        
         Args:
-            recipients (List[str]): List of recipient email addresses
+            recipients (List[str]): List of recipient email addresses (use only real/provided emails)
             subject (str): Subject line of the email
-            body (str): Email body content (plain text or HTML)
-            body_type (str, optional): Content type - "HTML" or "Text". Defaults to "HTML"
-            cc_emails (List[str], optional): List of CC email addresses
-            bcc_emails (List[str], optional): List of BCC email addresses
-            attachments (List[Dict], optional): List of attachment objects
+            body (str): Email body content (plain text or HTML) - will be auto-formatted if HTML
+            body_type (str, optional): Content type - "HTML" (recommended) or "Text". Defaults to "HTML"
+            cc_emails (List[str], optional): List of CC email addresses (use same emails as recipients)
+            bcc_emails (List[str], optional): List of BCC email addresses (use same emails as recipients)
+            attachments (List[Dict], optional): AVOID - List of attachment objects (complex formatting required)
             
         Returns:
             str: JSON string with success status and email details or error information
@@ -173,7 +174,29 @@ class MicrosoftToolkit:
                     "subject": subject
                 })
             else:
-                return json.dumps({"error": f"Failed to send email: {response.status_code}", "success": False})
+                # Get detailed error information from Microsoft Graph API
+                error_details = "No error details available"
+                try:
+                    error_response = response.json()
+                    if 'error' in error_response:
+                        error_info = error_response['error']
+                        error_details = f"Code: {error_info.get('code', 'Unknown')}, Message: {error_info.get('message', 'No message')}"
+                        if 'details' in error_info:
+                            details = error_info['details']
+                            if details:
+                                error_details += f", Details: {details}"
+                    else:
+                        error_details = response.text[:200] if response.text else "No response content"
+                except:
+                    error_details = response.text[:200] if response.text else "No response content"
+                
+                return json.dumps({
+                    "error": f"Failed to send email (HTTP {response.status_code}): {error_details}", 
+                    "success": False,
+                    "status_code": response.status_code,
+                    "sender_email": sender_email,
+                    "recipients": recipients
+                })
                 
         except Exception as e:
             return json.dumps({"error": f"Exception: {str(e)}", "success": False})

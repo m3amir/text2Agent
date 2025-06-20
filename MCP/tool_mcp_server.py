@@ -102,6 +102,12 @@ class UniversalToolServer:
                             if param.default == inspect.Parameter.empty:
                                 required.append(param_name)
                         
+                        # Add secret_name as optional parameter for credential lookup
+                        properties['secret_name'] = {
+                            'type': 'string',
+                            'description': 'Optional secret name for retrieving credentials from AWS Secrets Manager'
+                        }
+                        
                         input_schema = {
                             "type": "object",
                             "properties": properties,
@@ -146,7 +152,13 @@ class UniversalToolServer:
             try:
                 print(f"🔧 Instantiating {tool_class.__name__} for {method_name}", file=sys.stderr, flush=True)
                 print(f"📋 Arguments received: {arguments}", file=sys.stderr, flush=True)
-                credentials = self._get_credentials(tool_class.__name__)
+                
+                # Extract secret_name from arguments if present (for AWS Secrets Manager)
+                secret_name = arguments.pop('secret_name', None)
+                if secret_name:
+                    print(f"🔐 Secret name provided: {secret_name}", file=sys.stderr, flush=True)
+                
+                credentials = self._get_credentials(tool_class.__name__, secret_name)
                 
                 # Ensure all tools use the same agent run ID
                 if not self.shared_agent_run_id:
@@ -155,12 +167,33 @@ class UniversalToolServer:
                     self.shared_agent_run_id = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:8]}"
                     print(f"🆔 Using shared agent run ID: {self.shared_agent_run_id}", file=sys.stderr, flush=True)
                 
-                # Initialize tool with shared agent run ID
-                if credentials:
-                    instance = tool_class(credentials, agent_run_id=self.shared_agent_run_id)
-                else:
-                    instance = tool_class(agent_run_id=self.shared_agent_run_id)
+                # Initialize tool with shared agent run ID (only if constructor accepts it)
+                try:
+                    sig = inspect.signature(tool_class.__init__)
+                    accepts_agent_run_id = 'agent_run_id' in sig.parameters
+                    
+                    if credentials:
+                        print(f"🔍 Credentials being passed to {tool_class.__name__}: {credentials}", file=sys.stderr, flush=True)
+                        if accepts_agent_run_id:
+                            instance = tool_class(credentials, agent_run_id=self.shared_agent_run_id)
+                        else:
+                            instance = tool_class(credentials)
+                    else:
+                        if accepts_agent_run_id:
+                            instance = tool_class(agent_run_id=self.shared_agent_run_id)
+                        else:
+                            instance = tool_class()
+                except Exception as e:
+                    # Fallback to original method without agent_run_id
+                    if credentials:
+                        instance = tool_class(credentials)
+                    else:
+                        instance = tool_class()
                 print(f"✅ {tool_class.__name__} instantiated, calling {method_name}", file=sys.stderr, flush=True)
+                
+                # Debug the instance email value
+                if hasattr(instance, 'email'):
+                    print(f"📧 Instance email value: {instance.email}", file=sys.stderr, flush=True)
                 
                 result = getattr(instance, method_name)(**arguments)
                 
@@ -185,8 +218,13 @@ class UniversalToolServer:
                 return [TextContent(type="text", text=f"Error: {str(e)}")]
         return handler
     
-    def _get_credentials(self, class_name):
-        """Get credentials for tool class from config file"""
+    def _get_credentials(self, class_name, secret_name=None):
+        """Get credentials for tool class from config file or AWS Secrets Manager"""
+        # If secret_name is provided, try to get credentials from AWS Secrets Manager
+        if secret_name:
+            return self._get_credentials_from_secrets(secret_name, class_name)
+        
+        # Fall back to existing config file method
         config = self._load_config()
         for tool_name, tool_config in config.get("local", {}).items():
             if tool_name.lower() in class_name.lower():
@@ -203,6 +241,45 @@ class UniversalToolServer:
                     return processed_creds
                 return None
         return None
+    
+    def _get_credentials_from_secrets(self, secret_name, class_name):
+        """Get credentials from AWS Secrets Manager"""
+        try:
+            # Import the get_secret function from utils.core
+            sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+            from utils.core import get_secret
+            
+            # Use the provided secret name
+            print(f"🔐 Retrieving credentials from Secrets Manager: {secret_name}", file=sys.stderr, flush=True)
+            
+            # Get secret from AWS Secrets Manager
+            secret_data = get_secret(secret_name)
+            
+            print(f"✅ Successfully retrieved credentials", file=sys.stderr, flush=True)
+            
+            # Handle flat MICROSOFT_ structure
+            if any(key.startswith('MICROSOFT_') for key in secret_data.keys()) and 'microsoft' in class_name.lower():
+                microsoft_creds = {}
+                for key, value in secret_data.items():
+                    if key.startswith('MICROSOFT_'):
+                        clean_key = key.replace('MICROSOFT_', '').lower()
+                        microsoft_creds[clean_key] = value
+                print(f"🔄 Converted flat MICROSOFT_ keys to nested structure", file=sys.stderr, flush=True)
+                return microsoft_creds
+            # Check if the secret contains tool-specific credentials
+            elif class_name.lower() in secret_data:
+                print(f"✅ Found {class_name} credentials in secret", file=sys.stderr, flush=True)
+                return secret_data[class_name.lower()]
+            elif 'microsoft' in secret_data and 'microsoft' in class_name.lower():
+                print(f"✅ Found Microsoft credentials in nested format", file=sys.stderr, flush=True)
+                return secret_data['microsoft']
+            else:
+                print(f"⚠️ No {class_name} credentials found in secret", file=sys.stderr, flush=True)
+                return None
+            
+        except Exception as e:
+            print(f"❌ Failed to retrieve credentials from Secrets Manager: {e}", file=sys.stderr, flush=True)
+            return None
     
     async def _load_remote_tools(self):
         """Load remote MCP server tools"""

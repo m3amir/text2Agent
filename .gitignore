@@ -3,6 +3,7 @@
 # Logs
 logs/
 *.log
+tmp/
 
 /text2Agent/
 
