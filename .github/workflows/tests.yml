@@ -66,7 +66,6 @@ jobs:
           MICROSOFT_CLIENT_ID: ${{ secrets.MICROSOFT_CLIENT_ID }}
           MICROSOFT_CLIENT_SECRET: ${{ secrets.MICROSOFT_CLIENT_SECRET }}
           MICROSOFT_SITE_URL: ${{ secrets.MICROSOFT_SITE_URL }}
-          MICROSOFT_EMAIL: ${{ secrets.MICROSOFT_EMAIL }}
           # AWS credentials for real testing
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}

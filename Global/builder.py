@@ -68,7 +68,7 @@ class PipelineBuilder:
         
         # Execute collector workflow
         final_state = None
-        for step in collector_workflow.stream(initial_state, config=config):
+        async for step in collector_workflow.astream(initial_state, config=config):
             # Handle interrupts by asking user for feedback
             if '__interrupt__' in step:
                 interrupt_data = step['__interrupt__'][0]
@@ -92,13 +92,13 @@ class PipelineBuilder:
                     
                     print("\n✅ All questions answered! Processing your responses...")
                     
-                    collector_workflow.update_state(
+                    await collector_workflow.aupdate_state(
                         config, 
                         {"answered_questions": [answers], "reviewed": True}
                     )
                     
                     # Continue execution
-                    for resume_step in collector_workflow.stream(None, config=config):
+                    async for resume_step in collector_workflow.astream(None, config=config):
                         final_state = resume_step
             else:
                 final_state = step
@@ -153,7 +153,7 @@ def build_agent_pipeline_sync(agent_description: str, user_email: str = "") -> D
 if __name__ == "__main__":
     async def main():
         result = await build_agent_pipeline(
-            "Send emails to leads for our new nfx product our leads are in excel", 'amir@m3labs.co.uk'
+            "Send emails to amir in our leads excel spreadsheet you will find his email", 'amir@m3labs.co.uk'
         )
         
         if result['success']:
