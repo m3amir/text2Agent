@@ -5,7 +5,7 @@ Logs/*
 !Logs/log_manager.py
 !Logs/__init__.py
 *.log
-
+tmp/
 /text2Agent/
 
 *.pyc
