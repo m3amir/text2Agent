@@ -120,7 +120,7 @@ class Collector:
         workflow.add_edge("validate_connectors", END)
         return workflow.compile(checkpointer=MemorySaver())
 
-    def validate_connectors(self, state: State) -> State:        
+    async def validate_connectors(self, state: State) -> State:        
         valid_connectors = []
         seen_connectors = set()
         llm = LLM()
@@ -134,7 +134,7 @@ class Collector:
                 seen_connectors.add(connector_name)
         
         state['connectors'] = valid_connectors
-        state['connector_tools'] = self.load_connector_tools(valid_connectors)
+        state['connector_tools'] = await self.load_connector_tools(valid_connectors)
         tools = self.format_tools(state['connector_tools'])
         prompt = (self.warehouse.get_prompt('tools') + "\n\n" + 
                  "User Agent Description: " + state['input'] + "\n\n" +
@@ -163,15 +163,15 @@ class Collector:
         state['final_result'] = final_result
         return state
 
-    def load_connector_tools(self, valid_connectors):
+    async def load_connector_tools(self, valid_connectors):
         """Load tools using our local connector infrastructure"""
-        from Global.Collector.connectors import get_multiple_connector_tools_sync
+        from Global.Collector.connectors import get_multiple_connector_tools
         
         connector_tools = {}
         
         try:
             # Use our connector system to get tools for valid connectors only
-            all_tools = get_multiple_connector_tools_sync(valid_connectors)
+            all_tools = await get_multiple_connector_tools(valid_connectors)
             
             for connector_name in valid_connectors:
                 connector_tools[connector_name] = {}

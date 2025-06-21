@@ -402,6 +402,107 @@ def upload_text_as_pdf_to_s3(text_content: str, user_email: str, filename: str =
         logger.error(f"❌ Text to PDF upload failed: {e}")
         return False
 
+def save_file_to_s3(file_path: str, user_email: str, s3_path: str, metadata: Dict[str, str] = None) -> bool:
+    """
+    Save any file to tenant-specific S3 bucket with flexible path structure
+    Following the same pattern as the LogManager for tenant-specific uploads
+    
+    Args:
+        file_path (str): Local path to the file to upload
+        user_email (str): User's email address for tenant lookup
+        s3_path (str): S3 path where the file should be saved (e.g., "cognito/{email}/Data/{run_id}/test_results.json")
+        metadata (Dict[str, str], optional): Additional metadata for the S3 object
+        
+    Returns:
+        bool: True if upload was successful, False otherwise
+    """
+    try:
+        from pathlib import Path
+        
+        # Get tenant-specific bucket name using the same logic as LogManager
+        try:
+            tenant_domain = get_tenant_domain_by_email(user_email)
+            if tenant_domain:
+                bucket_name = tenant_domain
+            else:
+                bucket_name = 'ai-colleagues-logs-default'
+        except Exception as e:
+            bucket_name = 'ai-colleagues-logs-default'
+            logger.warning(f"⚠️ Failed to get tenant bucket, using default: {e}")
+        
+        # Set up AWS session and S3 client
+        session = get_aws_session()
+        s3_client = session.client('s3')
+        
+        # Ensure bucket exists (same logic as LogManager)
+        try:
+            s3_client.head_bucket(Bucket=bucket_name)
+            logger.info(f"✅ Bucket {bucket_name} exists")
+        except s3_client.exceptions.NoSuchBucket:
+            try:
+                logger.info(f"🔧 Creating tenant bucket {bucket_name}...")
+                if AWS_REGION == 'us-east-1':
+                    s3_client.create_bucket(Bucket=bucket_name)
+                else:
+                    s3_client.create_bucket(
+                        Bucket=bucket_name,
+                        CreateBucketConfiguration={'LocationConstraint': AWS_REGION}
+                    )
+                logger.info(f"✅ Created tenant bucket {bucket_name}")
+            except Exception as create_error:
+                logger.warning(f"⚠️ Cannot create bucket {bucket_name} (likely permissions): {create_error}")
+                logger.info(f"📝 Upload failed - bucket creation required")
+                return False
+        except Exception as e:
+            logger.warning(f"⚠️ Error checking bucket {bucket_name}: {e}")
+            return False
+        
+        # Use the provided S3 path directly
+        s3_key = s3_path
+        
+        # Check if file already exists in S3
+        try:
+            s3_client.head_object(Bucket=bucket_name, Key=s3_key)
+            logger.info(f"⏭️ File already exists in S3, overwriting: {Path(file_path).name}")
+        except s3_client.exceptions.NoSuchKey:
+            # File doesn't exist, proceed with upload
+            pass
+        except Exception as e:
+            logger.warning(f"⚠️ Could not check if file exists in S3: {e}")
+            # Proceed with upload anyway
+            pass
+        
+        # Prepare default metadata
+        default_metadata = {
+            'source': 'text2agent-system',
+            'user_email': user_email,
+            'upload_time': datetime.now().isoformat()
+        }
+        
+        # Merge with provided metadata
+        if metadata:
+            default_metadata.update(metadata)
+        
+        # Upload file
+        s3_client.upload_file(
+            file_path,
+            bucket_name,
+            s3_key,
+            ExtraArgs={
+                'StorageClass': 'STANDARD_IA',  # Infrequent Access for cost savings
+                'Metadata': default_metadata
+            }
+        )
+        
+        logger.info(f"☁️ Uploaded file to s3://{bucket_name}/{s3_key}")
+        print(f"☁️ File saved to S3: s3://{bucket_name}/{s3_key}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to upload file to S3: {e}")
+        print(f"❌ Failed to upload file to S3: {e}")
+        return False
+
 def list_database_structure():
     """List all schemas and tables in the database for debugging"""
     try:
@@ -434,3 +535,48 @@ def list_database_structure():
     except Exception as e:
         logger.error(f"❌ Failed to list database structure: {e}")
         raise
+
+def get_user_secret_name_by_email(email: str) -> Optional[str]:
+    """Get user-specific secret name from AWS Secrets Manager based on email"""
+    try:
+        # First try to get tenant-specific secret name
+        tenant_domain = get_tenant_domain_by_email(email)
+        if tenant_domain:
+            # Use tenant domain as secret name pattern
+            secret_name = f"{tenant_domain}-credentials"
+            logger.info(f"✅ Generated secret name for {email}: {secret_name}")
+            return secret_name
+        
+        # Fallback: use user uid as secret name
+        user_uid = get_user_uid_by_email(email)
+        if user_uid:
+            secret_name = f"user-{user_uid}-credentials"
+            logger.info(f"✅ Generated fallback secret name for {email}: {secret_name}")
+            return secret_name
+        
+        # Ultimate fallback: use email domain
+        domain = email.split('@')[1].replace('.', '-')
+        secret_name = f"{domain}-credentials"
+        logger.warning(f"⚠️ Using domain-based secret name for {email}: {secret_name}")
+        return secret_name
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to get secret name for {email}: {e}")
+        return None
+
+def get_user_credentials_by_email(email: str) -> Optional[Dict[str, Any]]:
+    """Get user-specific credentials from AWS Secrets Manager"""
+    try:
+        secret_name = get_user_secret_name_by_email(email)
+        if not secret_name:
+            logger.error(f"❌ Could not determine secret name for {email}")
+            return None
+        
+        logger.info(f"🔐 Retrieving credentials for {email} from secret: {secret_name}")
+        credentials = get_secret(secret_name)
+        logger.info(f"✅ Successfully retrieved credentials for {email}")
+        return credentials
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to retrieve credentials for {email}: {e}")
+        return None
