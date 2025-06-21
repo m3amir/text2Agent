@@ -178,17 +178,6 @@ jobs:
           echo "🚀 Running slower integration tests (LLM calls):"
           python -m pytest Tests/Testing/test.py -v --tb=short -s -m "slow" || echo "⚠️ Slow tests skipped or failed due to service availability"
 
-      - name: Run Complete Test Suite
-        env:
-          PYTHONPATH: ${{ github.workspace }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
-        run: |
-          echo "📊 Running complete test suite..."
-          python -m pytest Tests/MCP/test.py Tests/skeleton/test.py Tests/prompts/ Tests/collector/test.py Tests/Testing/test.py -v --tb=short
-        continue-on-error: true
-
       - name: Test Summary
         run: |
           echo "📊 Test Summary:"
