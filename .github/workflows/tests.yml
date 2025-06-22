@@ -45,7 +45,7 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
         run: |
-          echo "🐳 Setting up Docker for MCP tests..."
+          echo "Setting up Docker for MCP tests..."
           
           # Docker is pre-installed on GitHub Actions runners
           docker --version
@@ -84,14 +84,14 @@ jobs:
           python -c "import sys; sys.path.insert(0, '.'); import Tests.MCP.test; print('✅ Test file imports successfully')" || echo "❌ Test file import failed"
           echo "Testing pytest collection:"
           python -m pytest Tests/MCP/test.py --collect-only -v || echo "❌ Test collection failed"
-          echo "🧪 Running MCP tests (with real Docker integration when available):"
+          echo "Running MCP tests (with real Docker integration when available):"
           python -m pytest Tests/MCP/test.py -v --tb=short -s || {
             echo "❌ MCP tests failed, trying individual test file:"
             python -m pytest Tests/MCP/test.py -v --tb=short -s || {
               echo "❌ Individual test file also failed, trying with traceback:"
               python -m pytest Tests/MCP/test.py -v --tb=long -s || {
                 echo "❌ All MCP test attempts failed"
-                echo "🔍 Final debugging - checking Python can import test modules:"
+                echo "Final debugging - checking Python can import test modules:"
                 python -c "import sys; sys.path.insert(0, '.'); import Tests.MCP.test; print('✅ Test module imports')" || echo "❌ Test import failed"
                 python -c "import pytest; print('✅ Pytest available')" || echo "❌ Pytest import failed"
                 exit 1
@@ -106,8 +106,8 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
         run: |
-          echo "🧪 Running Skeleton Workflow Tests..."
-          echo "🔍 Debugging Python environment:"
+          echo "Running Skeleton Workflow Tests..."
+          echo "Debugging Python environment:"
           echo "PYTHONPATH: $PYTHONPATH"
           echo "Current directory: $(pwd)"
           echo "Python version: $(python --version)"
@@ -120,7 +120,7 @@ jobs:
           python -c "import sys; sys.path.insert(0, '.'); from utils.core import get_tenant_domain_by_email; print('✅ utils.core import successful')" || echo "❌ utils.core import failed"
           python -c "import sys; sys.path.insert(0, '.'); from Logs.log_manager import LogManager; print('✅ Logs.log_manager import successful')" || echo "❌ Logs.log_manager import failed"
           python -c "import sys; sys.path.insert(0, '.'); from Global.Architect.skeleton import run_skeleton; print('✅ skeleton import successful')" || echo "❌ skeleton import failed"
-          echo "🧪 Running actual tests:"
+          echo "Running actual tests:"
           python -m pytest Tests/skeleton/test.py -v --tb=short -s
 
       - name: Run Prompt Warehouse Tests
@@ -130,13 +130,13 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
         run: |
-          echo "📝 Running Prompt Warehouse Tests..."
-          echo "🔍 Validating prompt structure:"
+          echo "Running Prompt Warehouse Tests..."
+          echo "Validating prompt structure:"
           echo "Prompts directory: $(ls -la Prompts/ | head -5)"
           echo "Test prompts directory: $(ls -la Tests/prompts/ | head -5)"
           echo "Testing prompt warehouse imports:"
           python -c "import sys; sys.path.insert(0, '.'); from Prompts.promptwarehouse import PromptWarehouse; print('✅ PromptWarehouse import successful')" || echo "❌ PromptWarehouse import failed"
-          echo "🧪 Running prompt warehouse tests:"
+          echo "Running prompt warehouse tests:"
           python -m pytest Tests/prompts/ -v --tb=short -s
 
       - name: Run Collector Tests
@@ -146,13 +146,13 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
         run: |
-          echo "🤖 Running Collector Agent Tests..."
-          echo "🔍 Validating collector structure:"
+          echo "Running Collector Agent Tests..."
+          echo "Validating collector structure:"
           echo "Global/Collector directory: $(ls -la Global/Collector/ | head -5)"
           echo "Tests/collector directory: $(ls -la Tests/collector/ | head -5)"
           echo "Testing collector imports:"
           python -c "import sys; sys.path.insert(0, '.'); from Global.Collector.agent import Collector; print('✅ Collector import successful')" || echo "❌ Collector import failed"
-          echo "🧪 Running collector tests (mix of real and mocked):"
+          echo "Running collector tests (mix of real and mocked):"
           python -m pytest Tests/collector/test.py -v --tb=short -s
 
       - name: Run Testing Module Tests
@@ -165,30 +165,30 @@ jobs:
           MICROSOFT_CLIENT_ID: ${{ secrets.MICROSOFT_CLIENT_ID }}
           MICROSOFT_CLIENT_SECRET: ${{ secrets.MICROSOFT_CLIENT_SECRET }}
         run: |
-          echo "🧪 Running Testing Module Integration Tests..."
-          echo "🔍 Validating testing module structure:"
+          echo "Running Testing Module Integration Tests..."
+          echo "Validating testing module structure:"
           echo "Global/Testing directory: $(ls -la Global/Testing/ | head -5)"
           echo "Tests/Testing directory: $(ls -la Tests/Testing/ | head -5)"
           echo "Testing module imports:"
           python -c "import sys; sys.path.insert(0, '.'); from Global.Testing.test import Test; print('✅ Test class import successful')" || echo "❌ Test class import failed"
           python -c "import sys; sys.path.insert(0, '.'); from Global.llm import LLM; print('✅ LLM import successful')" || echo "❌ LLM import failed"
           python -c "import sys; sys.path.insert(0, '.'); from Global.Architect.skeleton import Skeleton; print('✅ Skeleton import successful')" || echo "❌ Skeleton import failed"
-          echo "🧪 Running real integration tests (with service availability checks):"
+          echo "Running real integration tests (with service availability checks):"
           python -m pytest Tests/Testing/test.py -v --tb=short -s -m "not slow" || echo "⚠️ Some tests skipped due to service availability"
-          echo "🚀 Running slower integration tests (LLM calls):"
+          echo "Running slower integration tests (LLM calls):"
           python -m pytest Tests/Testing/test.py -v --tb=short -s -m "slow" || echo "⚠️ Slow tests skipped or failed due to service availability"
 
       - name: Test Summary
         run: |
-          echo "📊 Test Summary:"
+          echo "Test Summary:"
           echo "✅ Configuration validation: Passed"
-          echo "🔧 MCP tests: Completed (with Docker support)"
-          echo "🧪 Skeleton tests: Completed (real workflow execution)"
-          echo "📝 Prompt Warehouse tests: Completed (AWS Bedrock integration)"
-          echo "🤖 Collector tests: Completed (real LLM integration)"
-          echo "🧪 Testing Module tests: Completed (real service integration)"
+          echo "MCP tests: Completed (with Docker support)"
+          echo "Skeleton tests: Completed (real workflow execution)"
+          echo "Prompt Warehouse tests: Completed (AWS Bedrock integration)"
+          echo "Collector tests: Completed (real LLM integration)"
+          echo "Testing Module tests: Completed (real service integration)"
           echo ""
-          echo "🎯 Test Coverage:"
+          echo "Test Coverage:"
           echo "   • Docker-based MCP servers"
           echo "   • Microsoft Graph API integration"
           echo "   • Chart and PDF generation"
@@ -204,7 +204,7 @@ jobs:
           echo "   • Email tool testing with dry-run safety"
           echo "   • Tool argument generation and validation"
           echo ""  
-          echo "🚀 All tests completed successfully!"
+          echo "All tests completed successfully!"
 
   basic-validation:
     runs-on: ubuntu-latest
@@ -234,30 +234,30 @@ jobs:
 
       - name: Run Configuration Tests Only
         run: |
-          echo "🔍 Running basic configuration and structure validation..."
+          echo "Running basic configuration and structure validation..."
           echo "PYTHONPATH=${{ github.workspace }}" >> "$GITHUB_ENV"
           python -m pytest Tests/MCP/test.py::TestMCPConfiguration -v
           python -m pytest Tests/MCP/test.py::test_mcp_directory_structure -v
           python -m pytest Tests/MCP/test.py::test_config_json_validity -v
           python -m pytest Tests/MCP/test.py::TestDockerMCPServers::test_docker_availability -v
           
-          echo "📝 Running basic prompt warehouse validation..."
+          echo "Running basic prompt warehouse validation..."
           python -m pytest Tests/prompts/test_promptwarehouse.py::TestPromptWarehouseIntegration::test_promptwarehouse_file_exists -v
           python -m pytest Tests/prompts/test_promptwarehouse.py::TestPromptWarehouseIntegration::test_real_prompt_files_structure -v
           
-          echo "🤖 Running basic collector validation..."
+          echo "Running basic collector validation..."
           python -m pytest Tests/collector/test.py::TestCollector::test_collector_initialization -v
           python -m pytest Tests/collector/test.py::TestCollector::test_format_connectors -v
           python -m pytest Tests/collector/test.py::TestCollector::test_format_tools -v
           
-          echo "🧪 Running basic testing module validation..."
+          echo "Running basic testing module validation..."
           python -m pytest Tests/Testing/test.py::test_real_module_imports -v
           python -m pytest Tests/Testing/test.py::test_real_dependencies_available -v
           python -m pytest Tests/Testing/test.py::TestTestClassReal::test_real_initialization -v
 
       - name: Validate Directory Structure
         run: |
-          echo "📁 Validating project structure..."
+          echo "Validating project structure..."
           required_dirs=("Tests/skeleton" "Tests/MCP" "Tests/prompts" "Tests/Testing" "MCP/Config" "Global/Architect" "Global/Testing" "Tools" "Prompts")
           
           for dir in "${required_dirs[@]}"; do
@@ -281,7 +281,7 @@ jobs:
               fi
           done
           
-          echo "🔍 Checking real prompt files..."
+          echo "Checking real prompt files..."
           prompt_dirs=("Prompts/collector" "Prompts/STR" "Prompts/poolOfColleagues" "Prompts/task_expansion")
           
           for dir in "${prompt_dirs[@]}"; do

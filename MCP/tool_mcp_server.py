@@ -52,7 +52,7 @@ class UniversalToolServer:
         """Initialize server with local and remote tools"""
         await self._load_local_tools()
         await self._load_remote_tools()
-        print(f"🚀 Server ready with {len(self.tools)} tools", file=sys.stderr)
+        print(f"Server ready with {len(self.tools)} tools", file=sys.stderr)
     
     async def _load_local_tools(self):
         """Load tools from Tools directory"""
@@ -150,13 +150,13 @@ class UniversalToolServer:
         """Create handler for tool method"""
         async def handler(arguments: Dict[str, Any]):
             try:
-                print(f"🔧 Instantiating {tool_class.__name__} for {method_name}", file=sys.stderr, flush=True)
-                print(f"📋 Arguments received: {arguments}", file=sys.stderr, flush=True)
+                print(f"Instantiating {tool_class.__name__} for {method_name}", file=sys.stderr, flush=True)
+                print(f"Arguments received: {arguments}", file=sys.stderr, flush=True)
                 
                 # Extract secret_name from arguments if present (for AWS Secrets Manager)
                 secret_name = arguments.pop('secret_name', None)
                 if secret_name:
-                    print(f"🔐 Secret name provided: {secret_name}", file=sys.stderr, flush=True)
+                    print(f"Secret name provided: {secret_name}", file=sys.stderr, flush=True)
                 
                 credentials = self._get_credentials(tool_class.__name__, secret_name)
                 
@@ -165,7 +165,7 @@ class UniversalToolServer:
                     from datetime import datetime
                     import uuid
                     self.shared_agent_run_id = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:8]}"
-                    print(f"🆔 Using shared agent run ID: {self.shared_agent_run_id}", file=sys.stderr, flush=True)
+                    print(f"Using shared agent run ID: {self.shared_agent_run_id}", file=sys.stderr, flush=True)
                 
                 # Initialize tool with shared agent run ID (only if constructor accepts it)
                 try:
@@ -173,7 +173,7 @@ class UniversalToolServer:
                     accepts_agent_run_id = 'agent_run_id' in sig.parameters
                     
                     if credentials:
-                        print(f"🔍 Credentials being passed to {tool_class.__name__}: {credentials}", file=sys.stderr, flush=True)
+                        print(f"Credentials being passed to {tool_class.__name__}: {credentials}", file=sys.stderr, flush=True)
                         if accepts_agent_run_id:
                             instance = tool_class(credentials, agent_run_id=self.shared_agent_run_id)
                         else:
@@ -193,7 +193,7 @@ class UniversalToolServer:
                 
                 # Debug the instance email value
                 if hasattr(instance, 'email'):
-                    print(f"📧 Instance email value: {instance.email}", file=sys.stderr, flush=True)
+                    print(f"Instance email value: {instance.email}", file=sys.stderr, flush=True)
                 
                 result = getattr(instance, method_name)(**arguments)
                 
@@ -205,9 +205,9 @@ class UniversalToolServer:
                     import os
                     if os.path.exists(instance.charts_folder):
                         chart_files = os.listdir(instance.charts_folder)
-                        print(f"🗂️  Charts folder contains: {chart_files}", file=sys.stderr, flush=True)
+                        print(f"Charts folder contains: {chart_files}", file=sys.stderr, flush=True)
                     else:
-                        print(f"📁 Charts folder does not exist: {instance.charts_folder}", file=sys.stderr, flush=True)
+                        print(f"Charts folder does not exist: {instance.charts_folder}", file=sys.stderr, flush=True)
                 
                 print(f"✅ Tool result: {result}", file=sys.stderr, flush=True)
                 return [TextContent(type="text", text=str(result))]
@@ -250,7 +250,7 @@ class UniversalToolServer:
             from utils.core import get_secret
             
             # Use the provided secret name
-            print(f"🔐 Retrieving credentials from Secrets Manager: {secret_name}", file=sys.stderr, flush=True)
+            print(f"Retrieving credentials from Secrets Manager: {secret_name}", file=sys.stderr, flush=True)
             
             # Get secret from AWS Secrets Manager
             secret_data = get_secret(secret_name)
@@ -261,10 +261,10 @@ class UniversalToolServer:
             connector_name = self._extract_connector_name(class_name)
             
             if connector_name:
-                print(f"🔍 Detected connector: {connector_name} from class: {class_name}", file=sys.stderr, flush=True)
+                print(f"Detected connector: {connector_name} from class: {class_name}", file=sys.stderr, flush=True)
                 return self._get_connector_credentials(secret_data, connector_name)
             else:
-                print(f"⚠️ Could not detect connector from class name: {class_name}", file=sys.stderr, flush=True)
+                print(f"Could not detect connector from class name: {class_name}", file=sys.stderr, flush=True)
                 return None
             
         except Exception as e:
@@ -307,8 +307,8 @@ class UniversalToolServer:
                     clean_key = key.replace(prefix, '').lower()  # SLACK_TOKEN → token
                     connector_creds[clean_key] = value
             
-            print(f"🔄 Found {len(matching_keys)} {connector_name} credentials with prefix {prefix}", file=sys.stderr, flush=True)
-            print(f"📋 Credential keys: {list(connector_creds.keys())}", file=sys.stderr, flush=True)
+            print(f"Found {len(matching_keys)} {connector_name} credentials with prefix {prefix}", file=sys.stderr, flush=True)
+            print(f"Credential keys: {list(connector_creds.keys())}", file=sys.stderr, flush=True)
             return connector_creds
         
         # Check for nested structure
@@ -317,7 +317,7 @@ class UniversalToolServer:
             print(f"✅ Found {connector_name} credentials in nested format", file=sys.stderr, flush=True)
             return secret_data[connector_lower]
         
-        print(f"⚠️ No {connector_name} credentials found (tried prefix '{prefix}' and nested '{connector_lower}')", file=sys.stderr, flush=True)
+        print(f"No {connector_name} credentials found (tried prefix '{prefix}' and nested '{connector_lower}')", file=sys.stderr, flush=True)
         return None
     
     async def _load_remote_tools(self):
@@ -352,7 +352,7 @@ class UniversalToolServer:
                     ))
                     self.handlers[tool_name] = lambda args, cfg=config, orig=tool.name: self._call_remote(cfg, orig, args)
                 
-                print(f"🔌 {server_name} ({len(tools_result.tools)} tools)", file=sys.stderr)
+                print(f"{server_name} ({len(tools_result.tools)} tools)", file=sys.stderr)
     
     async def _call_remote(self, config, original_name, arguments):
         """Call remote tool"""

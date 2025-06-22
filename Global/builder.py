@@ -9,7 +9,19 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 from Global.Collector.agent import Collector
 from Global.Architect.skeleton import Skeleton
-from utils.core import get_user_credentials_by_email, get_user_secret_name_by_email, get_secret
+from utils.core import get_secret
+
+# Import MCP tools function
+try:
+    import importlib.util
+    converter_path = os.path.join(os.path.dirname(__file__), '..', 'MCP', 'langchain_converter.py')
+    spec = importlib.util.spec_from_file_location("langchain_converter", converter_path)
+    langchain_converter = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(langchain_converter)
+    get_mcp_tools_with_session = langchain_converter.get_mcp_tools_with_session
+except Exception as e:
+    print(f"Failed to import MCP tools: {e}")
+    get_mcp_tools_with_session = None
 
 class PipelineBuilder:
     """Simple pipeline builder that combines collector and architect"""
@@ -20,7 +32,7 @@ class PipelineBuilder:
         
         # Initialize user credentials
         self.user_credentials = None
-        self.user_secret_name = None
+        self.user_secret_name = "test_"  # Default to test_ for now
         
         # Load user credentials if email provided
         if user_email:
@@ -40,61 +52,34 @@ class PipelineBuilder:
         """Load user-specific credentials from secret manager"""
         try:
             print(f"🔐 Loading credentials for user: {self.user_email}")
-            
-            # For now, use "test_" as the secret name
-            self.user_secret_name = "test_"
-            print(f"🔑 Using test secret name: {self.user_secret_name}")
-            
-            # Retrieve credentials directly from secret manager
             self.user_credentials = get_secret(self.user_secret_name)
+            
             if self.user_credentials:
-                print(f"✅ Successfully loaded credentials for {self.user_email}")
+                print(f"✅ Successfully loaded credentials")
                 print(f"🔑 Secret name: {self.user_secret_name}")
-                
-                # Print credential structure (safely)
-                print("\n📋 CREDENTIAL STRUCTURE:")
-                print("=" * 50)
-                self._print_credential_structure(self.user_credentials, indent=0)
-                print("=" * 50)
-                
+                self._print_credential_summary(self.user_credentials)
             else:
                 print(f"❌ Failed to load credentials for {self.user_email}")
                 
         except Exception as e:
             print(f"❌ Error loading user credentials: {e}")
             self.user_credentials = None
-            self.user_secret_name = None
     
-    def _print_credential_structure(self, data, indent=0):
-        """Safely print credential structure without exposing sensitive values"""
-        spaces = "  " * indent
+    def _print_credential_summary(self, data):
+        """Print a safe summary of credential structure"""
+        print("\n📋 CREDENTIAL SUMMARY:")
+        print("=" * 30)
         
         if isinstance(data, dict):
             for key, value in data.items():
-                if isinstance(value, dict):
-                    print(f"{spaces}{key}: (nested object)")
-                    self._print_credential_structure(value, indent + 1)
-                elif isinstance(value, list):
-                    print(f"{spaces}{key}: (list with {len(value)} items)")
-                    for i, item in enumerate(value):
-                        print(f"{spaces}  [{i}]:")
-                        self._print_credential_structure(item, indent + 2)
-                else:
-                    # For sensitive values, show type and length/pattern instead of actual value
-                    if any(sensitive in key.lower() for sensitive in ['password', 'secret', 'key', 'token']):
-                        if isinstance(value, str) and len(value) > 0:
-                            print(f"{spaces}{key}: *** (string, {len(value)} chars)")
-                        else:
-                            print(f"{spaces}{key}: *** ({type(value).__name__})")
+                if any(sensitive in key.lower() for sensitive in ['password', 'secret', 'key', 'token']):
+                    if isinstance(value, str) and len(value) > 0:
+                        print(f"  {key}: *** ({len(value)} chars)")
                     else:
-                        # Safe to show non-sensitive values
-                        print(f"{spaces}{key}: {value}")
-        elif isinstance(data, list):
-            for i, item in enumerate(data):
-                print(f"{spaces}[{i}]:")
-                self._print_credential_structure(item, indent + 1)
-        else:
-            print(f"{spaces}Value: {data}")
+                        print(f"  {key}: *** ({type(value).__name__})")
+                else:
+                    print(f"  {key}: {value}")
+        print("=" * 30)
     
     def get_user_credentials(self) -> Optional[Dict[str, Any]]:
         """Get the loaded user credentials"""
@@ -107,28 +92,44 @@ class PipelineBuilder:
     async def build_pipeline(self) -> Dict[str, Any]:
         """Build the complete pipeline"""
         try:
-            # Phase 1: Run collector to get connectors and tools
-            await self._run_collector()
+            # Use MCP session context manager (like Test class)
+            if get_mcp_tools_with_session is None:
+                print("⚠️ MCP not available")
+                return {
+                    'success': False,
+                    'error': 'MCP tools not available',
+                    'user_credentials_loaded': self.user_credentials is not None,
+                    'user_secret_name': self.user_secret_name,
+                    'mcp_session_active': False
+                }
             
-            # Phase 2: Build skeleton workflow
-            await self._run_skeleton()
-            
-            return {
-                'success': True,
-                'connectors': self.connectors,
-                'tools': self.tools,
-                'blueprint': self.blueprint,
-                'workflow': self.workflow,
-                'user_credentials_loaded': self.user_credentials is not None,
-                'user_secret_name': self.user_secret_name
-            }
+            async with get_mcp_tools_with_session() as mcp_tools:
+                print("🔌 MCP session active for pipeline")
+                
+                # Phase 1: Run collector to get connectors and tools
+                await self._run_collector()
+                
+                # Phase 2: Build skeleton workflow  
+                await self._run_skeleton(mcp_tools)
+                
+                return {
+                    'success': True,
+                    'connectors': self.connectors,
+                    'tools': self.tools,
+                    'blueprint': self.blueprint,
+                    'workflow': self.workflow,
+                    'user_credentials_loaded': self.user_credentials is not None,
+                    'user_secret_name': self.user_secret_name,
+                    'mcp_session_active': True
+                }
             
         except Exception as e:
             return {
                 'success': False,
                 'error': str(e),
                 'user_credentials_loaded': self.user_credentials is not None,
-                'user_secret_name': self.user_secret_name
+                'user_secret_name': self.user_secret_name,
+                'mcp_session_active': False
             }
     
     async def _run_collector(self):
@@ -142,7 +143,7 @@ class PipelineBuilder:
             'answered_questions': [],
             'reviewed': False,
             'connector_tools': {},
-            'user_secret_name': self.user_secret_name  # Pass secret name to workflow
+            'user_secret_name': self.user_secret_name
         }
         
         thread_id = f"collector_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -151,20 +152,17 @@ class PipelineBuilder:
         # Execute collector workflow
         final_state = None
         async for step in collector_workflow.astream(initial_state, config=config):
-            # Handle interrupts by asking user for feedback
             if '__interrupt__' in step:
                 interrupt_data = step['__interrupt__'][0]
                 if 'questions' in interrupt_data.value:
                     questions = interrupt_data.value['questions']
                     
-                    print("\n" + "="*60)
-                    print("📋 FEEDBACK QUESTIONS - Please provide your answers:")
-                    print("="*60)
+                    print("\n📋 FEEDBACK QUESTIONS:")
+                    print("=" * 40)
                     
                     answers = {}
                     for i, question in enumerate(questions, 1):
                         print(f"\n🔸 Question {i}: {question}")
-                        print("-" * 50)
                         while True:
                             answer = input("Your answer: ").strip()
                             if answer:
@@ -172,7 +170,7 @@ class PipelineBuilder:
                                 break
                             print("⚠️  Please provide a non-empty answer.")
                     
-                    print("\n✅ All questions answered! Processing your responses...")
+                    print("\n✅ Processing your responses...")
                     
                     await collector_workflow.aupdate_state(
                         config, 
@@ -190,7 +188,7 @@ class PipelineBuilder:
             self.connectors = state_data.get('connectors', [])
             self.tools = state_data.get('connector_tools', {})
     
-    async def _run_skeleton(self):
+    async def _run_skeleton(self, mcp_tools):
         """Run skeleton to build workflow"""
         # Generate simple blueprint
         self.blueprint = {
@@ -200,7 +198,7 @@ class PipelineBuilder:
                 ("process_with_tools", "provide_output")
             ],
             "node_tools": {},
-            "user_secret_name": self.user_secret_name  # Include secret name in blueprint
+            "user_secret_name": self.user_secret_name
         }
         
         # Assign tools to processing node
@@ -220,7 +218,7 @@ class PipelineBuilder:
         
         task_description = f"Agent: {self.agent_description}"
         self.skeleton.create_skeleton(task_description, self.blueprint)
-        self.workflow = self.skeleton.compile_graph()
+        self.workflow, viz_files = self.skeleton.compile_and_visualize(task_description)
 
 # Simple function to build pipeline
 async def build_agent_pipeline(agent_description: str, user_email: str = "") -> Dict[str, Any]:
@@ -235,15 +233,31 @@ def build_agent_pipeline_sync(agent_description: str, user_email: str = "") -> D
 
 if __name__ == "__main__":
     async def main():
-        result = await build_agent_pipeline(
-            "Send emails to amir in our leads excel spreadsheet you will find his email", 'amir@m3labs.co.uk'
+        print("🚀 Starting Pipeline Builder")
+        print("=" * 40)
+        
+        # Build first pipeline
+        print("\n📦 Building Pipeline 1...")
+        result1 = await build_agent_pipeline(
+            "Send emails to amir in our leads excel spreadsheet you will find his email", 
+            'amir@m3labs.co.uk'
         )
         
-        if result['success']:
-            print(f"✅ Pipeline built successfully!")
-            print(f"📦 Connectors: {result['connectors']}")
-            print(f"🔧 Tools: {len(result['tools'])} connectors")
-        else:
-            print(f"❌ Pipeline failed: {result['error']}")
+        print(f"✅ Pipeline 1: {'Success' if result1['success'] else 'Failed'}")
+        if result1['success']:
+            print(f"📦 Connectors: {result1['connectors']}")
+            print(f"🔧 Tools: {len(result1['tools'])} connectors")
+        
+        # Build second pipeline
+        print("\n📦 Building Pipeline 2...")
+        result2 = await build_agent_pipeline(
+            "Generate charts and create PDF reports with analysis", 
+            'amir@m3labs.co.uk'
+        )
+        
+        print(f"✅ Pipeline 2: {'Success' if result2['success'] else 'Failed'}")
+        if result2['success']:
+            print(f"📦 Connectors: {result2['connectors']}")
+            print(f"🔧 Tools: {len(result2['tools'])} connectors")
     
     asyncio.run(main())

@@ -50,6 +50,10 @@ class State(TypedDict):
     final_result: dict
 
 class Collector:
+    # Add class-level cache for connector tools
+    _connector_tools_cache = {}
+    _cache_initialized = False
+    
     def __init__(self, agent_description: str, user_email: str):
         self.agent_description = agent_description
         self.warehouse = PromptWarehouse('m3')
@@ -167,6 +171,12 @@ class Collector:
         """Load tools using our local connector infrastructure"""
         from Global.Collector.connectors import get_multiple_connector_tools
         
+        # Check if we already have cached tools for these connectors
+        cache_key = tuple(sorted(valid_connectors))
+        if cache_key in self._connector_tools_cache:
+            print("✓ Using cached connector tools")
+            return self._connector_tools_cache[cache_key]
+        
         connector_tools = {}
         
         try:
@@ -186,6 +196,9 @@ class Collector:
                         }
                 
                 print(f"✓ Loaded {len(connector_tools[connector_name])} tools for {connector_name}")
+            
+            # Cache the results
+            self._connector_tools_cache[cache_key] = connector_tools
                 
         except Exception as e:
             print(f"Error loading connector tools: {e}")
