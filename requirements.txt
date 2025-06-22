@@ -1,20 +1,51 @@
+# Core LangGraph and LangChain dependencies
 langgraph
+langchain_openai
+langchain_aws
+langchain_community
+langchain_text_splitters
+langchain-mcp-adapters
+
+# MCP (Model Context Protocol)
+mcp
+mcp-server
+
+# Connector-specific packages
 simple-salesforce
 msgraph-sdk
 slack-sdk
 zenpy
-langchain_openai
+
+# AWS and cloud services
 boto3
-mcp
-mcp-server
-beautifulsoup4
-langchain_text_splitters
-langchain_community
-docx
-python-docx
-ollama
-htmldocx
-taskgroup
-langchain-mcp-adapters
-python-dotenv
+
+# Database
+psycopg2-binary
+
+# Web framework
 flask
+werkzeug
+
+# Document processing
+beautifulsoup4
+python-docx
+docx2txt
+PyPDF2
+reportlab
+
+# Chart generation dependencies
+matplotlib
+seaborn
+pandas
+numpy
+
+# Utility packages
+python-dotenv
+requests
+authlib
+aiofiles
+
+# Testing dependencies
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+pytest-mock>=3.10.0 

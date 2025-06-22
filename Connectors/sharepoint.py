@@ -9,9 +9,9 @@ from msgraph.graph_request_adapter import GraphRequestAdapter, options
 from msgraph.graph_service_client import GraphServiceClient
 from msgraph_core import GraphClientFactory
 
-class SharePoint:
+class Microsoft:
     def __init__(self, credentials, loop=None):
-        """Initialize the SharePoint connector without making any async calls."""
+        """Initialize the Microsoft connector without making any async calls."""
         try:
             # Ensure the credentials dictionary contains required keys
             if not all(key in credentials for key in ['tenant_id', 'client_id', 'client_secret']):
@@ -30,7 +30,7 @@ class SharePoint:
             self.account = self.create_client()
 
         except Exception as e:
-            print(f"Error initializing SharePoint connector: {e}")
+            print(f"Error initializing Microsoft connector: {e}")
             raise
 
     def get_request_adapter(self, credentials: ClientSecretCredential, scopes: Optional[list[str]] = None) -> GraphRequestAdapter:
@@ -61,7 +61,7 @@ class SharePoint:
             try:
                 asyncio.get_running_loop()
             except RuntimeError:
-                print("Creating new event loop for SharePoint me() operation")
+                print("Creating new event loop for Microsoft me() operation")
                 asyncio.set_event_loop(asyncio.new_event_loop())
             
             # Initialize the account client dynamically for the async context
@@ -75,12 +75,12 @@ class SharePoint:
             return None
 
     async def list_permissions(self):
-        """List permissions for SharePoint."""
+        """List permissions for Microsoft."""
         try:
             try:
                 asyncio.get_running_loop()
             except RuntimeError:
-                print("Creating new event loop for SharePoint operation")
+                print("Creating new event loop for Microsoft operation")
                 asyncio.set_event_loop(asyncio.new_event_loop())
             
             # Initialize the account client dynamically for the async context

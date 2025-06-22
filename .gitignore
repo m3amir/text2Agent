@@ -1,17 +1,19 @@
 .DS_Store
 
-# Logs
-logs/
+# Logs - ignore all files except log_manager.py and __init__.py
+Logs/*
+!Logs/log_manager.py
+!Logs/__init__.py
 *.log
-
+tmp/
 /text2Agent/
 
 *.pyc
 
-# Secret files with credentials (keep .example files)
+# Secret files with credentials (config files now use environment variables)
 Connectors/.gdrive-server-credentials.json
 MCP/Config/config.json
-# Note: .example files are included for reference
+graph_images/
 
 # Environment files
 .env
@@ -35,3 +37,6 @@ env/
 .idea/
 *.swp
 *.swo
+MCP/Config/mcp_servers_config.json
+tmp/Charts/
+tmp/Reports/
