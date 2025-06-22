@@ -38,5 +38,3 @@ env/
 *.swp
 *.swo
 MCP/Config/mcp_servers_config.json
-tmp/Charts/
-tmp/Reports/
