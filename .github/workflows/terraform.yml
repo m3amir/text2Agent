@@ -81,7 +81,7 @@ jobs:
 
       - name: Terraform Plan
         run: |
-          terraform plan -out=tfplan -var="aws_region=${{ env.AWS_REGION }}"
+          terraform plan -out=tfplan -var="aws_region=${{ env.AWS_REGION }}" -var="aws_profile="
           terraform show -no-color tfplan > plan-output.txt
 
       - name: Upload Plan
@@ -192,7 +192,7 @@ jobs:
         run: terraform init
 
       - name: Terraform Destroy
-        run: terraform destroy -auto-approve -var="aws_region=${{ env.AWS_REGION }}"
+        run: terraform destroy -auto-approve -var="aws_region=${{ env.AWS_REGION }}" -var="aws_profile="
 
       - name: Destroy Summary
         run: |
