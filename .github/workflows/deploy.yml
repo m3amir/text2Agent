@@ -3,7 +3,7 @@ name: Deploy Infrastructure and Python App
 on:
   push:
     branches:
-      - main  # or your deployment branch
+      - deploy  # Only auto-deploy from deploy branch
   workflow_dispatch:  # Allow manual triggers
 
 jobs:
