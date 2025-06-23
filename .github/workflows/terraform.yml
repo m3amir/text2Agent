@@ -116,7 +116,7 @@ jobs:
     name: 'Terraform Apply'
     needs: [terraform-check, terraform-plan]
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event.inputs.action == 'apply')
+    if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feature/IAC') && (github.event_name == 'push' || github.event.inputs.action == 'apply')
     defaults:
       run:
         working-directory: ./terraform
