@@ -24,13 +24,13 @@ resource "null_resource" "enable_bedrock_models" {
       # Check if models are already enabled
       aws bedrock list-foundation-models \
         --region ${var.aws_region} \
-        --profile m3 \
+        ${var.aws_profile != "" ? "--profile ${var.aws_profile}" : ""} \
         --output table || echo "Bedrock service not accessible"
       
       # Enable Amazon Titan Embed Text V2 model
       aws bedrock put-model-invocation-logging-configuration \
         --region ${var.aws_region} \
-        --profile m3 \
+        ${var.aws_profile != "" ? "--profile ${var.aws_profile}" : ""} \
         --logging-config '{}' || echo "Model logging config already set"
       
       # Note: Model access must be requested manually via AWS Console
@@ -45,7 +45,7 @@ resource "null_resource" "enable_bedrock_models" {
       sleep 5
       aws bedrock invoke-model \
         --region ${var.aws_region} \
-        --profile m3 \
+        ${var.aws_profile != "" ? "--profile ${var.aws_profile}" : ""} \
         --model-id amazon.titan-embed-text-v2:0 \
         --body '{"inputText":"test"}' \
         --content-type application/json \
@@ -216,48 +216,48 @@ resource "null_resource" "bedrock_db_setup" {
       
       # Execute the database setup script using AWS RDS Data API
       aws rds-data execute-statement \
-        --profile m3 \
-        --region us-west-2 \
+        ${var.aws_profile != "" ? "--profile ${var.aws_profile}" : ""} \
+        --region ${var.aws_region} \
         --resource-arn "${aws_rds_cluster.bedrock.arn}" \
         --secret-arn "${aws_secretsmanager_secret.bedrock_kb_secret.arn}" \
         --database "postgres" \
         --sql "CREATE EXTENSION IF NOT EXISTS vector;" || echo "Vector extension may already exist"
       
       aws rds-data execute-statement \
-        --profile m3 \
-        --region us-west-2 \
+        ${var.aws_profile != "" ? "--profile ${var.aws_profile}" : ""} \
+        --region ${var.aws_region} \
         --resource-arn "${aws_rds_cluster.bedrock.arn}" \
         --secret-arn "${aws_secretsmanager_secret.bedrock_kb_secret.arn}" \
         --database "postgres" \
         --sql "CREATE SCHEMA IF NOT EXISTS bedrock_integration;"
       
       aws rds-data execute-statement \
-        --profile m3 \
-        --region us-west-2 \
+        ${var.aws_profile != "" ? "--profile ${var.aws_profile}" : ""} \
+        --region ${var.aws_region} \
         --resource-arn "${aws_rds_cluster.bedrock.arn}" \
         --secret-arn "${aws_secretsmanager_secret.bedrock_kb_secret.arn}" \
         --database "postgres" \
         --sql "CREATE TABLE IF NOT EXISTS bedrock_integration.bedrock_kb (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), embedding vector(1024), chunks text, metadata json, custom_metadata jsonb);"
       
       aws rds-data execute-statement \
-        --profile m3 \
-        --region us-west-2 \
+        ${var.aws_profile != "" ? "--profile ${var.aws_profile}" : ""} \
+        --region ${var.aws_region} \
         --resource-arn "${aws_rds_cluster.bedrock.arn}" \
         --secret-arn "${aws_secretsmanager_secret.bedrock_kb_secret.arn}" \
         --database "postgres" \
         --sql "CREATE INDEX IF NOT EXISTS bedrock_kb_embedding_idx ON bedrock_integration.bedrock_kb USING hnsw (embedding vector_cosine_ops);" || echo "Index may already exist"
       
       aws rds-data execute-statement \
-        --profile m3 \
-        --region us-west-2 \
+        ${var.aws_profile != "" ? "--profile ${var.aws_profile}" : ""} \
+        --region ${var.aws_region} \
         --resource-arn "${aws_rds_cluster.bedrock.arn}" \
         --secret-arn "${aws_secretsmanager_secret.bedrock_kb_secret.arn}" \
         --database "postgres" \
         --sql "CREATE INDEX IF NOT EXISTS bedrock_kb_chunks_idx ON bedrock_integration.bedrock_kb USING gin (to_tsvector('simple', chunks));" || echo "Index may already exist"
       
       aws rds-data execute-statement \
-        --profile m3 \
-        --region us-west-2 \
+        ${var.aws_profile != "" ? "--profile ${var.aws_profile}" : ""} \
+        --region ${var.aws_region} \
         --resource-arn "${aws_rds_cluster.bedrock.arn}" \
         --secret-arn "${aws_secretsmanager_secret.bedrock_kb_secret.arn}" \
         --database "postgres" \

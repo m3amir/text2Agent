@@ -18,11 +18,13 @@ terraform {
 }
 
 provider "aws" {
-  region  = var.aws_region
-  profile = "m3"
+  region = var.aws_region
 
-  # Force use of static credentials from credentials file
-  shared_credentials_files = ["~/.aws/credentials"]
+  # Use profile only when specified (for local development)
+  profile = var.aws_profile != "" ? var.aws_profile : null
+
+  # Use credentials file only when profile is specified
+  shared_credentials_files = var.aws_profile != "" ? ["~/.aws/credentials"] : null
 
   default_tags {
     tags = {

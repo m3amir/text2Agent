@@ -4,6 +4,12 @@ variable "aws_region" {
   default     = "us-west-2"
 }
 
+variable "aws_profile" {
+  description = "AWS profile to use (leave empty for CI/CD environments)"
+  type        = string
+  default     = ""
+}
+
 variable "environment" {
   description = "Environment name (e.g., dev, staging, prod)"
   type        = string
