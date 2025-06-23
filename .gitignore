@@ -40,3 +40,4 @@ env/
 MCP/Config/mcp_servers_config.json
 tmp/Charts/
 tmp/Reports/
+terraform/.terraform/
