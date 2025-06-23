@@ -1,0 +1,202 @@
+name: Deploy Terraform Infrastructure
+
+on:
+  push:
+    branches:
+      - main
+      - feature/IAC
+    paths:
+      - 'terraform/**'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'terraform/**'
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Terraform action to perform'
+        required: true
+        default: 'plan'
+        type: choice
+        options:
+        - plan
+        - apply
+        - destroy
+
+env:
+  TF_VERSION: 1.5.7
+  AWS_REGION: us-west-2
+
+jobs:
+  terraform-check:
+    name: 'Terraform Format and Validate'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./terraform
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Validate
+        run: terraform validate
+
+  terraform-plan:
+    name: 'Terraform Plan'
+    needs: terraform-check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./terraform
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Plan
+        run: |
+          terraform plan -out=tfplan -var="aws_region=${{ env.AWS_REGION }}"
+          terraform show -no-color tfplan > plan-output.txt
+
+      - name: Upload Plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan
+          path: |
+            terraform/tfplan
+            terraform/plan-output.txt
+          retention-days: 7
+
+      - name: Comment Plan on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('terraform/plan-output.txt', 'utf8');
+            const maxLength = 65536;
+            const truncatedPlan = plan.length > maxLength ? plan.substring(0, maxLength) + '\n...\n(Output truncated)' : plan;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## Terraform Plan 🏗️\n\`\`\`terraform\n${truncatedPlan}\n\`\`\``
+            });
+
+  terraform-apply:
+    name: 'Terraform Apply'
+    needs: [terraform-check, terraform-plan]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event.inputs.action == 'apply')
+    defaults:
+      run:
+        working-directory: ./terraform
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Download Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: terraform-plan
+          path: terraform/
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve tfplan
+
+      - name: Generate Outputs
+        run: |
+          terraform output -json > infrastructure-outputs.json
+          echo "## Infrastructure Deployed 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "### Key Resources Created:" >> $GITHUB_STEP_SUMMARY
+          echo "- **Main RDS Cluster**: $(terraform output -raw rds_cluster_id)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Bedrock RDS Cluster**: $(terraform output -raw bedrock_rds_cluster_id)" >> $GITHUB_STEP_SUMMARY
+          echo "- **S3 Bucket**: $(terraform output -raw str_data_store_bucket_id)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Bedrock Knowledge Base**: $(terraform output -raw bedrock_knowledge_base_id)" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload Infrastructure Outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: infrastructure-outputs
+          path: terraform/infrastructure-outputs.json
+          retention-days: 30
+
+  terraform-destroy:
+    name: 'Terraform Destroy'
+    runs-on: ubuntu-latest
+    if: github.event.inputs.action == 'destroy'
+    defaults:
+      run:
+        working-directory: ./terraform
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Destroy
+        run: terraform destroy -auto-approve -var="aws_region=${{ env.AWS_REGION }}"
+
+      - name: Destroy Summary
+        run: |
+          echo "## Infrastructure Destroyed 💥" >> $GITHUB_STEP_SUMMARY
+          echo "All AWS resources have been removed." >> $GITHUB_STEP_SUMMARY 

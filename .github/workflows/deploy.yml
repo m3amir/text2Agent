@@ -1,9 +1,10 @@
-name: Deploy Python App to Elastic Beanstalk
+name: Deploy Infrastructure and Python App
 
 on:
   push:
     branches:
       - main  # or your deployment branch
+  workflow_dispatch:  # Allow manual triggers
 
 jobs:
   test:
@@ -33,13 +34,74 @@ jobs:
           echo "🧪 Running tests before deployment..."
           python -m pytest Tests/ -v --tb=short
 
-  deploy:
+  terraform:
     needs: test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./terraform
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION || 'us-west-2' }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.5.7
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive
+        continue-on-error: true
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Validate
+        run: terraform validate
+
+      - name: Terraform Plan
+        run: terraform plan -out=tfplan
+        env:
+          TF_VAR_aws_region: ${{ secrets.AWS_REGION || 'us-west-2' }}
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve tfplan
+        env:
+          TF_VAR_aws_region: ${{ secrets.AWS_REGION || 'us-west-2' }}
+
+      - name: Output Infrastructure Info
+        run: |
+          echo "🏗️ Infrastructure deployed successfully!"
+          terraform output -json > infrastructure-outputs.json
+
+      - name: Upload Infrastructure Outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: infrastructure-outputs
+          path: terraform/infrastructure-outputs.json
+          retention-days: 30
+
+  deploy:
+    needs: [test, terraform]
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Download Infrastructure Outputs
+        uses: actions/download-artifact@v4
+        with:
+          name: infrastructure-outputs
+          path: ./
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -51,8 +113,21 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Configure Environment from Terraform Outputs
+        run: |
+          echo "📊 Configuring environment variables from Terraform outputs..."
+          # Extract values from Terraform outputs and set as environment variables
+          if [ -f infrastructure-outputs.json ]; then
+            echo "Infrastructure outputs found, configuring environment..."
+            # Example: Extract RDS endpoint, S3 bucket names, etc.
+            # RDS_ENDPOINT=$(jq -r '.rds_cluster_endpoint.value' infrastructure-outputs.json)
+            # echo "RDS_ENDPOINT=$RDS_ENDPOINT" >> $GITHUB_ENV
+          else
+            echo "No infrastructure outputs found, using default configuration..."
+          fi
+
       - name: Zip application
-        run: zip -r app.zip . -x "*.git*"
+        run: zip -r app.zip . -x "*.git*" -x "terraform/*" -x "*.terraform*"
 
       - name: Deploy to Elastic Beanstalk
         uses: einaregilsson/beanstalk-deploy@v21
@@ -64,3 +139,36 @@ jobs:
           region: ${{ secrets.AWS_REGION }}
           version_label: ${{ github.run_id }}
           deployment_package: app.zip
+
+  cleanup:
+    if: failure()
+    needs: [terraform, deploy]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./terraform
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION || 'us-west-2' }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.5.7
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Destroy (on failure)
+        run: terraform destroy -auto-approve
+        env:
+          TF_VAR_aws_region: ${{ secrets.AWS_REGION || 'us-west-2' }}
+        continue-on-error: true
