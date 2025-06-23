@@ -6,7 +6,7 @@ data "aws_bedrock_foundation_models" "available" {
 # Local values for model validation
 locals {
   titan_v2_model_arn = "arn:aws:bedrock:${var.aws_region}::foundation-model/amazon.titan-embed-text-v2:0"
-  available_models = [for model in data.aws_bedrock_foundation_models.available.model_summaries : model.model_arn]
+  available_models   = [for model in data.aws_bedrock_foundation_models.available.model_summaries : model.model_arn]
   titan_v2_available = contains(local.available_models, local.titan_v2_model_arn)
 }
 
@@ -333,7 +333,7 @@ resource "aws_bedrockagent_data_source" "s3_data_source" {
   vector_ingestion_configuration {
     chunking_configuration {
       chunking_strategy = var.chunking_strategy
-      
+
       # Conditional semantic chunking configuration (note: may have typo in provider)
       dynamic "semantic_chunking_configuration" {
         for_each = var.chunking_strategy == "SEMANTIC" ? [1] : []
@@ -375,7 +375,7 @@ resource "aws_bedrockagent_data_source" "s3_data_source" {
 # Output database setup script for manual execution
 resource "local_file" "bedrock_db_setup_script" {
   filename = "${path.module}/setup_bedrock_database.sql"
-  content = <<-EOT
+  content  = <<-EOT
 -- Setup script for Bedrock Knowledge Base database requirements
 -- Run this script against your Aurora PostgreSQL database after deployment
 

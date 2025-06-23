@@ -1,14 +1,14 @@
 # Random password for RDS
 resource "random_password" "db_password" {
-  length      = 16
-  special     = true
+  length           = 16
+  special          = true
   override_special = "!#$%&*()-_=+[]{}<>:?"
 }
 
 # Random password for Bedrock RDS
 resource "random_password" "bedrock_db_password" {
-  length      = 16
-  special     = true
+  length           = 16
+  special          = true
   override_special = "!#$%&*()-_=+[]{}<>:?"
 }
 
@@ -59,13 +59,13 @@ resource "aws_rds_cluster" "main" {
   db_subnet_group_name   = aws_db_subnet_group.main.name
   vpc_security_group_ids = [aws_security_group.rds.id]
 
-  backup_retention_period = 7
-  preferred_backup_window = "03:00-04:00"
+  backup_retention_period      = 7
+  preferred_backup_window      = "03:00-04:00"
   preferred_maintenance_window = "sun:04:00-sun:05:00"
 
-  storage_encrypted     = true
-  deletion_protection   = false
-  skip_final_snapshot   = true
+  storage_encrypted        = true
+  deletion_protection      = false
+  skip_final_snapshot      = true
   delete_automated_backups = true
 
   # Enable Data API
@@ -83,12 +83,12 @@ resource "aws_rds_cluster" "main" {
 
 # Main Application RDS Cluster Instances
 resource "aws_rds_cluster_instance" "main" {
-  count               = 1
-  identifier          = "${aws_rds_cluster.main.cluster_identifier}-${count.index + 1}"
-  cluster_identifier  = aws_rds_cluster.main.id
-  instance_class      = "db.serverless"
-  engine              = aws_rds_cluster.main.engine
-  engine_version      = "16.6"
+  count              = 1
+  identifier         = "${aws_rds_cluster.main.cluster_identifier}-${count.index + 1}"
+  cluster_identifier = aws_rds_cluster.main.id
+  instance_class     = "db.serverless"
+  engine             = aws_rds_cluster.main.engine
+  engine_version     = "16.6"
 
   performance_insights_enabled = true
   monitoring_interval          = 60
@@ -114,13 +114,13 @@ resource "aws_rds_cluster" "bedrock" {
   db_subnet_group_name   = aws_db_subnet_group.main.name
   vpc_security_group_ids = [aws_security_group.rds.id]
 
-  backup_retention_period = 7
-  preferred_backup_window = "04:00-05:00"
+  backup_retention_period      = 7
+  preferred_backup_window      = "04:00-05:00"
   preferred_maintenance_window = "sun:05:00-sun:06:00"
 
-  storage_encrypted     = true
-  deletion_protection   = false
-  skip_final_snapshot   = true
+  storage_encrypted        = true
+  deletion_protection      = false
+  skip_final_snapshot      = true
   delete_automated_backups = true
 
   # Enable Data API for Bedrock integration
@@ -138,12 +138,12 @@ resource "aws_rds_cluster" "bedrock" {
 
 # Bedrock Knowledge Base RDS Cluster Instances
 resource "aws_rds_cluster_instance" "bedrock" {
-  count               = 1
-  identifier          = "${aws_rds_cluster.bedrock.cluster_identifier}-${count.index + 1}"
-  cluster_identifier  = aws_rds_cluster.bedrock.id
-  instance_class      = "db.serverless"
-  engine              = aws_rds_cluster.bedrock.engine
-  engine_version      = "16.6"
+  count              = 1
+  identifier         = "${aws_rds_cluster.bedrock.cluster_identifier}-${count.index + 1}"
+  cluster_identifier = aws_rds_cluster.bedrock.id
+  instance_class     = "db.serverless"
+  engine             = aws_rds_cluster.bedrock.engine
+  engine_version     = "16.6"
 
   performance_insights_enabled = true
   monitoring_interval          = 60

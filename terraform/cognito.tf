@@ -3,7 +3,7 @@ resource "aws_cognito_user_pool" "main" {
   name = "${var.project_name}-${var.environment}-user-pool"
 
   # User attributes
-  alias_attributes = ["email"]
+  alias_attributes         = ["email"]
   auto_verified_attributes = ["email"]
 
   # Custom attributes
@@ -11,7 +11,7 @@ resource "aws_cognito_user_pool" "main" {
     attribute_data_type = "String"
     name                = "user_tier"
     mutable             = true
-    
+
     string_attribute_constraints {
       min_length = 1
       max_length = 50
@@ -77,13 +77,13 @@ resource "aws_cognito_user_pool_client" "main" {
   ]
 
   # Token validity
-  access_token_validity  = 60    # 1 hour
-  id_token_validity     = 60    # 1 hour
-  refresh_token_validity = 30   # 30 days
+  access_token_validity  = 60 # 1 hour
+  id_token_validity      = 60 # 1 hour
+  refresh_token_validity = 30 # 30 days
 
   token_validity_units {
     access_token  = "minutes"
-    id_token      = "minutes" 
+    id_token      = "minutes"
     refresh_token = "days"
   }
 
@@ -92,19 +92,19 @@ resource "aws_cognito_user_pool_client" "main" {
 
   # OAuth settings
   supported_identity_providers = ["COGNITO"]
-  
+
   callback_urls = [
     "https://localhost:3000/callback",
     "https://${var.project_name}-${var.environment}.example.com/callback"
   ]
-  
+
   logout_urls = [
     "https://localhost:3000/logout",
     "https://${var.project_name}-${var.environment}.example.com/logout"
   ]
 
-  allowed_oauth_flows = ["code", "implicit"]
-  allowed_oauth_scopes = ["email", "openid", "profile"]
+  allowed_oauth_flows                  = ["code", "implicit"]
+  allowed_oauth_scopes                 = ["email", "openid", "profile"]
   allowed_oauth_flows_user_pool_client = true
 
   # Read and write attributes
@@ -116,7 +116,7 @@ resource "aws_cognito_user_pool_client" "main" {
   ]
 
   write_attributes = [
-    "email", 
+    "email",
     "preferred_username",
     "custom:user_tier"
   ]

@@ -180,7 +180,7 @@ output "bedrock_kb_role_arn" {
 
 output "bedrock_model_access_status" {
   description = "Instructions for enabling Bedrock model access"
-  value = <<-EOT
+  value       = <<-EOT
 📋 Bedrock Model Access Instructions:
 
 If you get a "403" error when syncing the Knowledge Base:
@@ -200,7 +200,7 @@ Model ARN: arn:aws:bedrock:${var.aws_region}::foundation-model/amazon.titan-embe
 EOT
 }
 
-  # Cognito Outputs
+# Cognito Outputs
 output "cognito_user_pool_id" {
   description = "ID of the Cognito User Pool"
   value       = aws_cognito_user_pool.main.id

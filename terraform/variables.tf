@@ -116,7 +116,7 @@ variable "chunking_strategy" {
   description = "Chunking strategy for Bedrock Knowledge Base (FIXED_SIZE, NONE, HIERARCHICAL, SEMANTIC)"
   type        = string
   default     = "SEMANTIC"
-  
+
   validation {
     condition     = contains(["FIXED_SIZE", "NONE", "HIERARCHICAL", "SEMANTIC"], var.chunking_strategy)
     error_message = "Chunking strategy must be one of: FIXED_SIZE, NONE, HIERARCHICAL, SEMANTIC."
@@ -127,7 +127,7 @@ variable "semantic_breakpoint_percentile_threshold" {
   description = "Percentile threshold for semantic chunking breakpoints (0-100)"
   type        = number
   default     = 95
-  
+
   validation {
     condition     = var.semantic_breakpoint_percentile_threshold >= 50 && var.semantic_breakpoint_percentile_threshold <= 99
     error_message = "Breakpoint percentile threshold must be between 50 and 99."
@@ -138,7 +138,7 @@ variable "semantic_buffer_size" {
   description = "Buffer size for semantic chunking"
   type        = number
   default     = 1
-  
+
   validation {
     condition     = var.semantic_buffer_size >= 0 && var.semantic_buffer_size <= 2
     error_message = "Buffer size must be between 0 and 2."
@@ -149,7 +149,7 @@ variable "semantic_max_tokens" {
   description = "Maximum tokens per chunk for semantic chunking"
   type        = number
   default     = 300
-  
+
   validation {
     condition     = var.semantic_max_tokens >= 20 && var.semantic_max_tokens <= 8192
     error_message = "Max tokens must be between 20 and 8192."

@@ -1,6 +1,6 @@
 terraform {
   required_version = ">= 1.0"
-  
+
   required_providers {
     aws = {
       source  = "hashicorp/aws"
@@ -20,7 +20,7 @@ terraform {
 provider "aws" {
   region  = var.aws_region
   profile = "m3"
-  
+
   # Force use of static credentials from credentials file
   shared_credentials_files = ["~/.aws/credentials"]
 

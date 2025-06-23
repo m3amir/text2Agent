@@ -75,11 +75,11 @@ resource "aws_iam_policy" "lambda_policy" {
       },
       {
         Effect = "Allow"
-                  Action = [
-            "bedrock:InvokeModel",
-            "bedrock:Retrieve",
-            "bedrock:RetrieveAndGenerate"
-          ]
+        Action = [
+          "bedrock:InvokeModel",
+          "bedrock:Retrieve",
+          "bedrock:RetrieveAndGenerate"
+        ]
         Resource = "*"
       },
       {
@@ -138,12 +138,12 @@ resource "aws_security_group" "lambda_sg" {
 
 # Lambda function for Cognito Post-Confirmation trigger
 resource "aws_lambda_function" "post_confirmation" {
-  filename         = "post_confirmation.zip"
-  function_name    = "text2Agent-Post-Confirmation"
-  role            = aws_iam_role.lambda_execution_role.arn
-  handler         = "index.lambda_handler"
-  runtime         = "python3.11"
-  timeout         = 300
+  filename      = "post_confirmation.zip"
+  function_name = "text2Agent-Post-Confirmation"
+  role          = aws_iam_role.lambda_execution_role.arn
+  handler       = "index.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 300
 
   vpc_config {
     subnet_ids         = aws_subnet.private[*].id
