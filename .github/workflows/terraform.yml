@@ -181,14 +181,18 @@ jobs:
       - name: Generate Outputs
         run: |
           terraform output -json > infrastructure-outputs.json
-          echo "## 🧪 TEST Infrastructure Deployed (Simplified) 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "## 🧪 TEST Infrastructure Deployed (Lambda + Cognito) 🚀" >> $GITHUB_STEP_SUMMARY
           echo "### Resources Created (Testing Mode):" >> $GITHUB_STEP_SUMMARY
           echo "- **First Lambda Function**: $(terraform output -raw simple_lambda_function_name)" >> $GITHUB_STEP_SUMMARY
           echo "- **Second Lambda Function**: $(terraform output -raw second_lambda_function_name)" >> $GITHUB_STEP_SUMMARY
-          echo "- **Lambda Role**: $(terraform output -raw simple_lambda_role_arn)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Post Confirmation Lambda**: $(terraform output -raw post_confirmation_lambda_name)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Lambda Role**: $(terraform output -raw lambda_role_arn)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Cognito User Pool**: $(terraform output -raw cognito_user_pool_id)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Cognito Client**: $(terraform output -raw cognito_user_pool_client_id)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Cognito Domain**: $(terraform output -raw cognito_user_pool_domain)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### ⚠️ Testing Mode Active" >> $GITHUB_STEP_SUMMARY
-          echo "Heavy resources (VPC, RDS, S3, Cognito, Bedrock) are temporarily commented out for faster testing." >> $GITHUB_STEP_SUMMARY
+          echo "Heavy resources (VPC, RDS, S3, Bedrock) are commented out for faster testing." >> $GITHUB_STEP_SUMMARY
 
       - name: Upload Infrastructure Outputs
         uses: actions/upload-artifact@v4
