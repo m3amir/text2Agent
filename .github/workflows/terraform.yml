@@ -143,23 +143,56 @@ jobs:
       - name: Terraform Init
         run: terraform init
 
-      - name: Clean Conflicting Resources
+      - name: Handle Existing Resources
         run: |
-          echo "🧹 Cleaning conflicting resources..."
+          echo "🔄 Checking for existing resources and handling conflicts..."
           
-          # Delete conflicting IAM policies
-          aws iam delete-policy --policy-arn "arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):policy/text2agent-dev-bedrock-s3-policy" || echo "Policy doesn't exist"
-          aws iam delete-policy --policy-arn "arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):policy/text2agent-dev-bedrock-model-policy" || echo "Policy doesn't exist"
+          # Get account ID
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           
-          # Delete conflicting DB subnet group
-          aws rds delete-db-subnet-group --db-subnet-group-name text2agent-dev-db-subnet-group || echo "DB subnet group doesn't exist"
+          # Check if we need to force refresh state (GitHub Actions starts with empty state)
+          echo "Checking current Terraform state..."
+          terraform show || echo "Empty state detected"
           
-          echo "✅ Cleanup completed"
+          # For GitHub Actions, we'll start fresh since local already created everything
+          # Remove any existing state that might conflict
+          rm -f terraform.tfstate.backup
+          
+          echo "✅ Ready for fresh deployment"
 
       - name: Terraform Apply
         run: |
           echo "🚀 Applying Terraform configuration..."
-          terraform apply -auto-approve tfplan
+          
+          # Try normal apply first
+          if ! terraform apply -auto-approve tfplan 2>&1 | tee apply_output.log; then
+            echo "⚠️ Apply failed, checking for resource conflicts..."
+            
+            # Check if it's due to existing resources
+            if grep -q "already exists" apply_output.log; then
+              echo "🔄 Detected existing resources, recreating fresh plan and applying with force..."
+              
+              # Create a new plan that will handle conflicts
+              terraform plan -out=fresh-plan -var="aws_region=${{ env.AWS_REGION }}" -var="aws_profile=" \
+                -replace="aws_iam_role.bedrock_kb_role" \
+                -replace="aws_iam_role.rds_enhanced_monitoring" \
+                -replace="aws_iam_role.lambda_execution_role" \
+                -replace="aws_iam_policy.bedrock_s3_policy" \
+                -replace="aws_iam_policy.bedrock_model_policy" \
+                -replace="aws_iam_policy.bedrock_rds_policy" \
+                -replace="aws_iam_policy.lambda_policy" \
+                -replace="aws_db_subnet_group.main" || true
+              
+              # Apply the fresh plan
+              terraform apply -auto-approve fresh-plan
+            else
+              echo "❌ Apply failed for other reasons, exiting..."
+              cat apply_output.log
+              exit 1
+            fi
+          else
+            echo "✅ Apply succeeded on first try"
+          fi
 
       - name: Generate Outputs
         run: |
@@ -226,7 +259,7 @@ jobs:
           docker --version
           docker run --rm hello-world
           echo "✅ Docker is ready for MCP tests"
-
+          
       - name: Run Post-Deployment Tests
         env:
           PYTHONPATH: ${{ github.workspace }}
