@@ -75,6 +75,12 @@ jobs:
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
+      - name: Setup S3 Backend
+        run: |
+          echo "🚀 Setting up S3 backend for Terraform state..."
+          chmod +x ./setup_terraform_backend.sh
+          ./setup_terraform_backend.sh
+
       - name: Terraform Init
         run: terraform init
 
@@ -139,6 +145,12 @@ jobs:
         with:
           name: terraform-plan
           path: terraform/
+
+      - name: Setup S3 Backend
+        run: |
+          echo "🚀 Setting up S3 backend for Terraform state..."
+          chmod +x ./setup_terraform_backend.sh
+          ./setup_terraform_backend.sh
 
       - name: Terraform Init
         run: terraform init
@@ -216,6 +228,8 @@ jobs:
           name: infrastructure-outputs
           path: terraform/infrastructure-outputs.json
           retention-days: 30
+
+
 
   post-deployment-tests:
     name: 'Run Tests After Infrastructure Deployment'
@@ -333,8 +347,20 @@ jobs:
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
+      - name: Setup S3 Backend
+        run: |
+          echo "🚀 Setting up S3 backend for Terraform state..."
+          chmod +x ./setup_terraform_backend.sh
+          ./setup_terraform_backend.sh
+
       - name: Terraform Init
         run: terraform init
+
+      - name: Verify State
+        run: |
+          echo "🔍 Checking Terraform state..."
+          terraform show || echo "⚠️ No state found - resources may have been created outside of this workflow"
+          terraform state list || echo "⚠️ State list is empty"
 
       - name: Terraform Destroy
         run: |

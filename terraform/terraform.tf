@@ -2,14 +2,12 @@ terraform {
   required_version = ">= 1.0"
 
   # Remote state configuration for production
-  # Uncomment and configure for production environments
-  # backend "s3" {
-  #   bucket         = "your-terraform-state-bucket"
-  #   key            = "text2agent/${var.environment}/terraform.tfstate"
-  #   region         = "eu-west-2"
-  #   encrypt        = true
-  #   dynamodb_table = "terraform-state-lock"
-  # }
+  backend "s3" {
+    bucket         = "text2agent-terraform-state-eu-west-2"
+    key            = "text2agent/production/terraform.tfstate"
+    region         = "eu-west-2"
+    encrypt        = true
+  }
 
   required_providers {
     aws = {

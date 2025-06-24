@@ -155,17 +155,17 @@ output "nat_gateway_public_ips" {
 # Bedrock Knowledge Base Outputs
 output "bedrock_knowledge_base_id" {
   description = "ID of the Bedrock Knowledge Base"
-  value       = aws_bedrockagent_knowledge_base.main.id
+  value       = try(aws_bedrockagent_knowledge_base.main.id, "not-created")
 }
 
 output "bedrock_knowledge_base_arn" {
   description = "ARN of the Bedrock Knowledge Base"
-  value       = aws_bedrockagent_knowledge_base.main.arn
+  value       = try(aws_bedrockagent_knowledge_base.main.arn, "not-created")
 }
 
 output "bedrock_data_source_id" {
   description = "ID of the Bedrock Knowledge Base data source"
-  value       = aws_bedrockagent_data_source.s3_data_source.data_source_id
+  value       = try(aws_bedrockagent_data_source.s3_data_source.data_source_id, "not-created")
 }
 
 output "bedrock_kb_secret_arn" {
