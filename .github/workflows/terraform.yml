@@ -143,6 +143,19 @@ jobs:
       - name: Terraform Init
         run: terraform init
 
+      - name: Clean Conflicting Resources
+        run: |
+          echo "🧹 Cleaning conflicting resources..."
+          
+          # Delete conflicting IAM policies
+          aws iam delete-policy --policy-arn "arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):policy/text2agent-dev-bedrock-s3-policy" || echo "Policy doesn't exist"
+          aws iam delete-policy --policy-arn "arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):policy/text2agent-dev-bedrock-model-policy" || echo "Policy doesn't exist"
+          
+          # Delete conflicting DB subnet group
+          aws rds delete-db-subnet-group --db-subnet-group-name text2agent-dev-db-subnet-group || echo "DB subnet group doesn't exist"
+          
+          echo "✅ Cleanup completed"
+
       - name: Terraform Apply
         run: |
           echo "🚀 Applying Terraform configuration..."
