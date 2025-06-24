@@ -63,11 +63,11 @@ resource "aws_rds_cluster" "main" {
   preferred_backup_window      = "03:00-04:00"
   preferred_maintenance_window = "sun:04:00-sun:05:00"
 
-  storage_encrypted        = true
-  deletion_protection      = var.environment == "prod" ? true : false
-  skip_final_snapshot      = var.environment == "dev" ? true : false
+  storage_encrypted         = true
+  deletion_protection       = var.environment == "prod" ? true : false
+  skip_final_snapshot       = var.environment == "dev" ? true : false
   final_snapshot_identifier = var.environment == "dev" ? null : "${var.project_name}-main-final-snapshot-${formatdate("YYYYMMDD-hhmm", timestamp())}"
-  delete_automated_backups = var.environment == "dev" ? true : false
+  delete_automated_backups  = var.environment == "dev" ? true : false
 
   # Production protection lifecycle
   lifecycle {
