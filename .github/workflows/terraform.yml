@@ -155,25 +155,27 @@ jobs:
             if aws iam get-role --role-name "$role_name" &>/dev/null; then
               echo "Deleting role: $role_name"
               
-              # Detach managed policies
-              aws iam list-attached-role-policies --role-name "$role_name" --query 'AttachedPolicies[].PolicyArn' --output text | while read policy_arn; do
-                if [ -n "$policy_arn" ]; then
+              # Detach managed policies (handle tab-separated output)
+              aws iam list-attached-role-policies --role-name "$role_name" --query 'AttachedPolicies[].PolicyArn' --output text | tr '\t' '\n' | while read policy_arn; do
+                if [ -n "$policy_arn" ] && [ "$policy_arn" != "None" ]; then
                   echo "Detaching policy: $policy_arn"
-                  aws iam detach-role-policy --role-name "$role_name" --policy-arn "$policy_arn"
+                  aws iam detach-role-policy --role-name "$role_name" --policy-arn "$policy_arn" || echo "Failed to detach $policy_arn"
                 fi
               done
               
-              # Delete inline policies
-              aws iam list-role-policies --role-name "$role_name" --query 'PolicyNames' --output text | while read policy_name; do
-                if [ -n "$policy_name" ]; then
+              # Delete inline policies (handle tab-separated output)
+              aws iam list-role-policies --role-name "$role_name" --query 'PolicyNames' --output text | tr '\t' '\n' | while read policy_name; do
+                if [ -n "$policy_name" ] && [ "$policy_name" != "None" ]; then
                   echo "Deleting inline policy: $policy_name"
-                  aws iam delete-role-policy --role-name "$role_name" --policy-name "$policy_name"
+                  aws iam delete-role-policy --role-name "$role_name" --policy-name "$policy_name" || echo "Failed to delete inline policy $policy_name"
                 fi
               done
+              
+              # Wait a moment for policy detachments to propagate
+              sleep 2
               
               # Delete role
-              aws iam delete-role --role-name "$role_name"
-              echo "✅ Deleted role: $role_name"
+              aws iam delete-role --role-name "$role_name" && echo "✅ Deleted role: $role_name" || echo "❌ Failed to delete role: $role_name"
             else
               echo "✅ Role $role_name does not exist"
             fi
