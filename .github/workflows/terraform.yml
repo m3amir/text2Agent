@@ -143,8 +143,35 @@ jobs:
       - name: Terraform Init
         run: terraform init
 
+      - name: Terraform Refresh State
+        run: |
+          echo "🔄 Refreshing Terraform state to sync with actual AWS resources..."
+          terraform refresh -var="aws_region=${{ env.AWS_REGION }}" -var="aws_profile="
+          
+          echo "🧹 Checking for state inconsistencies..."
+          # Show current state
+          terraform show -no-color || echo "No current state"
+
       - name: Terraform Apply
-        run: terraform apply -auto-approve tfplan
+        run: |
+          echo "🚀 Applying Terraform configuration..."
+          terraform apply -auto-approve tfplan || {
+            echo "❌ Apply failed, attempting to handle potential state issues..."
+            echo "Checking for conflicting resources in AWS..."
+            
+            # List any existing text2agent resources
+            echo "Existing IAM roles:"
+            aws iam list-roles --query 'Roles[?starts_with(RoleName, `text2agent`)].RoleName' --output table || true
+            
+            echo "Existing IAM policies:"
+            aws iam list-policies --scope Local --query 'Policies[?starts_with(PolicyName, `text2agent`)].PolicyName' --output table || true
+            
+            echo "Existing DB subnet groups:"
+            aws rds describe-db-subnet-groups --query 'DBSubnetGroups[?starts_with(DBSubnetGroupName, `text2agent`)].DBSubnetGroupName' --output table || true
+            
+            echo "Please check the above resources and resolve conflicts manually"
+            exit 1
+          }
 
       - name: Generate Outputs
         run: |
