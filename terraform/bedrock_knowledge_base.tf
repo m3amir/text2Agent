@@ -11,4 +11,4 @@
 # To enable: uncomment resources and ensure dependencies are active:
 # - aws_s3_bucket.str_data_store (in s3.tf)
 # - aws_rds_cluster.bedrock (in rds.tf) 
-# - random_password.bedrock_db_password (in rds.tf) 
+# - random_password.bedrock_db_password (in rds.tf) xww

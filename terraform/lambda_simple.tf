@@ -67,4 +67,37 @@ resource "aws_lambda_function" "second_test_function" {
   }
 
   depends_on = [aws_iam_role_policy_attachment.simple_lambda_basic_execution]
+}
+
+# Post Confirmation Lambda for Cognito (Simplified)
+resource "aws_lambda_function" "post_confirmation" {
+  filename      = "post_confirmation.zip"
+  function_name = "text2Agent-Post-Confirmation"
+  role          = aws_iam_role.simple_lambda_execution_role.arn
+  handler       = "index.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 60
+
+  environment {
+    variables = {
+      ENVIRONMENT = var.environment
+      PROJECT     = var.project_name
+      FUNCTION    = "post-confirmation"
+    }
+  }
+
+  tags = {
+    Name = "text2Agent-Post-Confirmation"
+  }
+
+  depends_on = [aws_iam_role_policy_attachment.simple_lambda_basic_execution]
+}
+
+# Permission for Cognito to invoke Lambda
+resource "aws_lambda_permission" "allow_cognito_invoke" {
+  statement_id  = "AllowExecutionFromCognito"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.post_confirmation.function_name
+  principal     = "cognito-idp.amazonaws.com"
+  source_arn    = aws_cognito_user_pool.main.arn
 } 
