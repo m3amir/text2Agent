@@ -44,12 +44,12 @@ output "cognito_user_pool_domain" {
 
 output "deployment_info" {
   value = {
-    mode               = "TESTING - Lambda + Cognito + Triggers"
-    environment        = var.environment
-    project            = var.project_name
-    region             = var.aws_region
-    lambda_count       = 3
-    cognito_enabled    = true
-    triggers_enabled   = true
+    mode             = "TESTING - Lambda + Cognito + Triggers"
+    environment      = var.environment
+    project          = var.project_name
+    region           = var.aws_region
+    lambda_count     = 3
+    cognito_enabled  = true
+    triggers_enabled = true
   }
 } 
