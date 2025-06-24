@@ -24,6 +24,7 @@ on:
 env:
   TF_VERSION: 1.5.7
   AWS_REGION: eu-west-2
+  AWS_DEFAULT_REGION: eu-west-2
 
 jobs:
   terraform-check:
@@ -45,8 +46,26 @@ jobs:
       - name: Terraform Format Check
         run: terraform fmt -check -recursive
 
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup S3 Backend
+        run: |
+          echo "🚀 Setting up S3 backend for Terraform state..."
+          chmod +x ./setup_terraform_backend.sh
+          ./setup_terraform_backend.sh
+
       - name: Terraform Init
-        run: terraform init
+        run: |
+          terraform init \
+            -backend-config="bucket=text2agent-terraform-state-eu-west-2" \
+            -backend-config="key=text2agent/production/terraform.tfstate" \
+            -backend-config="region=eu-west-2" \
+            -backend-config="encrypt=true"
 
       - name: Terraform Validate
         run: terraform validate
@@ -165,56 +184,11 @@ jobs:
             -backend-config="region=eu-west-2" \
             -backend-config="encrypt=true"
 
-      - name: Handle Existing Resources
-        run: |
-          echo "🔄 Checking for existing resources and handling conflicts..."
-          
-          # Get account ID
-          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          
-          # Check if we need to force refresh state (GitHub Actions starts with empty state)
-          echo "Checking current Terraform state..."
-          terraform show || echo "Empty state detected"
-          
-          # For GitHub Actions, we'll start fresh since local already created everything
-          # Remove any existing state that might conflict
-          rm -f terraform.tfstate.backup
-          
-          echo "✅ Ready for fresh deployment"
-
       - name: Terraform Apply
         run: |
           echo "🚀 Applying Terraform configuration..."
-          
-          # Try normal apply first
-          if ! terraform apply -auto-approve tfplan 2>&1 | tee apply_output.log; then
-            echo "⚠️ Apply failed, checking for resource conflicts..."
-            
-            # Check if it's due to existing resources
-            if grep -q "already exists" apply_output.log; then
-              echo "🔄 Detected existing resources, recreating fresh plan and applying with force..."
-              
-              # Create a new plan that will handle conflicts
-              terraform plan -out=fresh-plan -var="aws_region=${{ env.AWS_REGION }}" -var="aws_profile=" \
-                -replace="aws_iam_role.bedrock_kb_role" \
-                -replace="aws_iam_role.rds_enhanced_monitoring" \
-                -replace="aws_iam_role.lambda_execution_role" \
-                -replace="aws_iam_policy.bedrock_s3_policy" \
-                -replace="aws_iam_policy.bedrock_model_policy" \
-                -replace="aws_iam_policy.bedrock_rds_policy" \
-                -replace="aws_iam_policy.lambda_policy" \
-                -replace="aws_db_subnet_group.main" || true
-              
-              # Apply the fresh plan
-              terraform apply -auto-approve fresh-plan
-            else
-              echo "❌ Apply failed for other reasons, exiting..."
-              cat apply_output.log
-              exit 1
-            fi
-          else
-            echo "✅ Apply succeeded on first try"
-          fi
+          terraform apply -auto-approve tfplan
+          echo "✅ Apply completed successfully"
 
       - name: Generate Outputs
         run: |
@@ -231,6 +205,9 @@ jobs:
           else
             echo "- **Bedrock Knowledge Base**: ⚠️ Creation pending (check Bedrock model access)" >> $GITHUB_STEP_SUMMARY
           fi
+          
+          echo "- **VPC ID**: $(terraform output -raw vpc_id)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Cognito User Pool**: $(terraform output -raw cognito_user_pool_id)" >> $GITHUB_STEP_SUMMARY
 
       - name: Upload Infrastructure Outputs
         uses: actions/upload-artifact@v4
@@ -238,8 +215,6 @@ jobs:
           name: infrastructure-outputs
           path: terraform/infrastructure-outputs.json
           retention-days: 30
-
-
 
   post-deployment-tests:
     name: 'Run Tests After Infrastructure Deployment'
@@ -283,7 +258,7 @@ jobs:
           MICROSOFT_SITE_URL: ${{ secrets.MICROSOFT_SITE_URL }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+          AWS_DEFAULT_REGION: ${{ env.AWS_DEFAULT_REGION }}
         run: |
           echo "Setting up Docker for MCP tests..."
           docker --version
@@ -295,7 +270,7 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+          AWS_DEFAULT_REGION: ${{ env.AWS_DEFAULT_REGION }}
           MICROSOFT_TENANT_ID: ${{ secrets.MICROSOFT_TENANT_ID }}
           MICROSOFT_CLIENT_ID: ${{ secrets.MICROSOFT_CLIENT_ID }}
           MICROSOFT_CLIENT_SECRET: ${{ secrets.MICROSOFT_CLIENT_SECRET }}
@@ -340,7 +315,7 @@ jobs:
     defaults:
       run:
         working-directory: ./terraform
-
+    
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -371,20 +346,64 @@ jobs:
             -backend-config="region=eu-west-2" \
             -backend-config="encrypt=true"
 
-      - name: Verify State
+      - name: Verify State and Resources
         run: |
-          echo "🔍 Checking Terraform state..."
-          terraform show || echo "⚠️ No state found - resources may have been created outside of this workflow"
-          terraform state list || echo "⚠️ State list is empty"
+          echo "🔍 Checking Terraform state and AWS resources..."
+          echo "Current state resources:"
+          RESOURCES=$(terraform state list)
+          if [ -z "$RESOURCES" ]; then
+            echo "❌ ERROR: No resources found in Terraform state!"
+            echo "This could mean:"
+            echo "  - Infrastructure was already destroyed"
+            echo "  - State file is missing or corrupted"
+            echo "  - Wrong backend configuration"
+            exit 1
+          else
+            echo "$RESOURCES"
+          fi
+          
+          echo ""
+          echo "Verifying state shows resources to destroy:"
+          terraform show || echo "⚠️ No state data"
+          
+          echo ""
+          echo "Planning destroy to see what will be removed:"
+          terraform plan -destroy -var="aws_region=${{ env.AWS_REGION }}" -var="aws_profile=" | head -50
 
       - name: Terraform Destroy
         run: |
           echo "💥 Starting infrastructure destruction..."
+          echo "Creating destroy plan..."
           terraform plan -destroy -out=destroy-plan -var="aws_region=${{ env.AWS_REGION }}" -var="aws_profile="
+          
+          echo ""
+          echo "Applying destroy plan..."
           terraform apply -auto-approve destroy-plan
+          
+          echo ""
           echo "✅ Infrastructure destroyed successfully"
+
+      - name: Verify Destruction
+        run: |
+          echo "🔍 Verifying destruction completed..."
+          terraform state list || echo "✅ State is empty - all resources destroyed"
+          
+          echo ""
+          echo "Checking for any remaining resources in AWS..."
+          aws ec2 describe-vpcs --filters "Name=tag:Project,Values=text2agent" --query 'Vpcs[*].[VpcId,Tags[?Key==`Name`].Value|[0]]' --output table || echo "No VPCs found"
+          aws rds describe-db-clusters --query 'DBClusters[?starts_with(DBClusterIdentifier, `text2agent`)].DBClusterIdentifier' --output table || echo "No RDS clusters found"
 
       - name: Destroy Summary
         run: |
           echo "## Infrastructure Destroyed 💥" >> $GITHUB_STEP_SUMMARY
           echo "✅ All AWS resources have been removed" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Terraform state is clean" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Resources that were destroyed:" >> $GITHUB_STEP_SUMMARY
+          echo "- VPC and networking components" >> $GITHUB_STEP_SUMMARY
+          echo "- RDS Aurora clusters (main and bedrock)" >> $GITHUB_STEP_SUMMARY
+          echo "- S3 buckets and data" >> $GITHUB_STEP_SUMMARY
+          echo "- Lambda functions" >> $GITHUB_STEP_SUMMARY
+          echo "- IAM roles and policies" >> $GITHUB_STEP_SUMMARY
+          echo "- Cognito user pools" >> $GITHUB_STEP_SUMMARY
+          echo "- Bedrock Knowledge Base" >> $GITHUB_STEP_SUMMARY
