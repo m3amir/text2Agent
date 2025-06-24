@@ -31,11 +31,11 @@ output "simple_lambda_role_arn" {
 output "deployment_info" {
   description = "Information about this simplified deployment"
   value = {
-    mode           = "TESTING - Simplified Lambda Only"
-    environment    = var.environment
-    project        = var.project_name
-    region         = var.aws_region
-    lambda_count   = 2
-    note           = "VPC, RDS, S3, Cognito, and Bedrock resources are temporarily commented out for faster testing"
+    mode         = "TESTING - Simplified Lambda Only"
+    environment  = var.environment
+    project      = var.project_name
+    region       = var.aws_region
+    lambda_count = 2
+    note         = "VPC, RDS, S3, Cognito, and Bedrock resources are temporarily commented out for faster testing"
   }
 } 
