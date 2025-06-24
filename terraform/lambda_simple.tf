@@ -30,7 +30,7 @@ resource "aws_iam_role_policy_attachment" "simple_lambda_basic_execution" {
 
 # Simple Lambda function for testing (no VPC dependencies)
 resource "aws_lambda_function" "simple_test_function" {
-  filename      = "post_confirmation.zip"  # Reusing existing zip file
+  filename      = "post_confirmation.zip" # Reusing existing zip file
   function_name = "text2Agent-Simple-Test"
   role          = aws_iam_role.simple_lambda_execution_role.arn
   handler       = "index.lambda_handler"

@@ -4,10 +4,10 @@ terraform {
   # Remote state configuration for production
   # Backend will be configured dynamically during terraform init
   backend "s3" {
-    bucket         = "text2agent-terraform-state-eu-west-2"
-    key            = "text2agent/production/terraform.tfstate"
-    region         = "eu-west-2"
-    encrypt        = true
+    bucket  = "text2agent-terraform-state-eu-west-2"
+    key     = "text2agent/production/terraform.tfstate"
+    region  = "eu-west-2"
+    encrypt = true
   }
 
   required_providers {
