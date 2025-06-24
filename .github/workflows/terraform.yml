@@ -143,35 +143,88 @@ jobs:
       - name: Terraform Init
         run: terraform init
 
-      - name: Terraform Refresh State
+      - name: Clean Existing Conflicting Resources
         run: |
-          echo "🔄 Refreshing Terraform state to sync with actual AWS resources..."
-          terraform refresh -var="aws_region=${{ env.AWS_REGION }}" -var="aws_profile="
+          echo "🧹 Checking and cleaning existing conflicting resources..."
           
-          echo "🧹 Checking for state inconsistencies..."
-          # Show current state
-          terraform show -no-color || echo "No current state"
-
-      - name: Terraform Apply
-        run: |
-          echo "🚀 Applying Terraform configuration..."
-          terraform apply -auto-approve tfplan || {
-            echo "❌ Apply failed, attempting to handle potential state issues..."
-            echo "Checking for conflicting resources in AWS..."
+          # Function to safely delete IAM role with policies
+          delete_iam_role() {
+            local role_name=$1
+            echo "Checking role: $role_name"
             
-            # List any existing text2agent resources
-            echo "Existing IAM roles:"
-            aws iam list-roles --query 'Roles[?starts_with(RoleName, `text2agent`)].RoleName' --output table || true
-            
-            echo "Existing IAM policies:"
-            aws iam list-policies --scope Local --query 'Policies[?starts_with(PolicyName, `text2agent`)].PolicyName' --output table || true
-            
-            echo "Existing DB subnet groups:"
-            aws rds describe-db-subnet-groups --query 'DBSubnetGroups[?starts_with(DBSubnetGroupName, `text2agent`)].DBSubnetGroupName' --output table || true
-            
-            echo "Please check the above resources and resolve conflicts manually"
-            exit 1
+            if aws iam get-role --role-name "$role_name" &>/dev/null; then
+              echo "Deleting role: $role_name"
+              
+              # Detach managed policies
+              aws iam list-attached-role-policies --role-name "$role_name" --query 'AttachedPolicies[].PolicyArn' --output text | while read policy_arn; do
+                if [ -n "$policy_arn" ]; then
+                  echo "Detaching policy: $policy_arn"
+                  aws iam detach-role-policy --role-name "$role_name" --policy-arn "$policy_arn"
+                fi
+              done
+              
+              # Delete inline policies
+              aws iam list-role-policies --role-name "$role_name" --query 'PolicyNames' --output text | while read policy_name; do
+                if [ -n "$policy_name" ]; then
+                  echo "Deleting inline policy: $policy_name"
+                  aws iam delete-role-policy --role-name "$role_name" --policy-name "$policy_name"
+                fi
+              done
+              
+              # Delete role
+              aws iam delete-role --role-name "$role_name"
+              echo "✅ Deleted role: $role_name"
+            else
+              echo "✅ Role $role_name does not exist"
+            fi
           }
+          
+          # Function to safely delete IAM policy
+          delete_iam_policy() {
+            local policy_name=$1
+            local account_id=$(aws sts get-caller-identity --query Account --output text)
+            local policy_arn="arn:aws:iam::${account_id}:policy/${policy_name}"
+            
+            echo "Checking policy: $policy_name"
+            if aws iam get-policy --policy-arn "$policy_arn" &>/dev/null; then
+              echo "Deleting policy: $policy_name"
+              aws iam delete-policy --policy-arn "$policy_arn"
+              echo "✅ Deleted policy: $policy_name"
+            else
+              echo "✅ Policy $policy_name does not exist"
+            fi
+          }
+          
+          # Delete IAM roles
+          delete_iam_role "text2agent-dev-bedrock-kb-role"
+          delete_iam_role "text2agent-dev-rds-monitoring-role"  
+          delete_iam_role "text2agent-dev-lambda-role"
+          
+          # Delete IAM policies
+          delete_iam_policy "text2agent-dev-bedrock-model-policy"
+          delete_iam_policy "text2agent-dev-bedrock-rds-policy"
+          delete_iam_policy "text2agent-dev-bedrock-s3-policy"
+          delete_iam_policy "text2agent-dev-lambda-policy"
+          
+          # Delete DB subnet group
+          echo "Checking DB subnet group..."
+          if aws rds describe-db-subnet-groups --db-subnet-group-name text2agent-dev-db-subnet-group &>/dev/null; then
+            echo "Deleting DB subnet group..."
+            aws rds delete-db-subnet-group --db-subnet-group-name text2agent-dev-db-subnet-group
+            echo "✅ Deleted DB subnet group"
+          else
+            echo "✅ DB subnet group does not exist"
+          fi
+          
+          echo "🎯 Cleanup completed!"
+
+      - name: Terraform Fresh Plan and Apply
+        run: |
+          echo "🔄 Creating fresh Terraform plan after cleanup..."
+          terraform plan -out=fresh-tfplan -var="aws_region=${{ env.AWS_REGION }}" -var="aws_profile="
+          
+          echo "🚀 Applying fresh Terraform configuration..."
+          terraform apply -auto-approve fresh-tfplan
 
       - name: Generate Outputs
         run: |
