@@ -218,7 +218,86 @@ jobs:
             echo "✅ DB subnet group does not exist"
           fi
           
-          echo "🎯 Cleanup completed!"
+          # Check and clean up unused VPCs to avoid VPC limit
+          echo "🌐 Checking VPC limits and cleaning up unused VPCs..."
+          
+          # List all VPCs and their usage
+          echo "Current VPCs in region:"
+          aws ec2 describe-vpcs --region ${{ env.AWS_REGION }} --query 'Vpcs[].{VpcId:VpcId,CidrBlock:CidrBlock,State:State,IsDefault:IsDefault}' --output table || true
+          
+          # Find text2agent VPCs that might be left over
+          echo "Checking for existing text2agent VPCs..."
+          TEXT2AGENT_VPCS=$(aws ec2 describe-vpcs --region ${{ env.AWS_REGION }} --filters "Name=tag:Project,Values=text2agent" --query 'Vpcs[].VpcId' --output text 2>/dev/null || echo "")
+          
+          if [ -n "$TEXT2AGENT_VPCS" ] && [ "$TEXT2AGENT_VPCS" != "None" ]; then
+            echo "Found existing text2agent VPCs: $TEXT2AGENT_VPCS"
+            for vpc_id in $TEXT2AGENT_VPCS; do
+              echo "Attempting to delete VPC: $vpc_id"
+              
+              # First, delete all resources in the VPC
+              echo "Cleaning up resources in VPC $vpc_id..."
+              
+              # Delete NAT Gateways
+              aws ec2 describe-nat-gateways --region ${{ env.AWS_REGION }} --filter "Name=vpc-id,Values=$vpc_id" --query 'NatGateways[].NatGatewayId' --output text | while read nat_id; do
+                if [ -n "$nat_id" ] && [ "$nat_id" != "None" ]; then
+                  echo "Deleting NAT Gateway: $nat_id"
+                  aws ec2 delete-nat-gateway --region ${{ env.AWS_REGION }} --nat-gateway-id "$nat_id" || true
+                fi
+              done
+              
+              # Wait for NAT Gateways to be deleted
+              sleep 10
+              
+              # Release Elastic IPs
+              aws ec2 describe-addresses --region ${{ env.AWS_REGION }} --filters "Name=domain,Values=vpc" --query 'Addresses[].AllocationId' --output text | while read eip_id; do
+                if [ -n "$eip_id" ] && [ "$eip_id" != "None" ]; then
+                  echo "Releasing EIP: $eip_id"
+                  aws ec2 release-address --region ${{ env.AWS_REGION }} --allocation-id "$eip_id" || true
+                fi
+              done
+              
+              # Delete Internet Gateway
+              aws ec2 describe-internet-gateways --region ${{ env.AWS_REGION }} --filters "Name=attachment.vpc-id,Values=$vpc_id" --query 'InternetGateways[].InternetGatewayId' --output text | while read igw_id; do
+                if [ -n "$igw_id" ] && [ "$igw_id" != "None" ]; then
+                  echo "Detaching and deleting Internet Gateway: $igw_id"
+                  aws ec2 detach-internet-gateway --region ${{ env.AWS_REGION }} --internet-gateway-id "$igw_id" --vpc-id "$vpc_id" || true
+                  aws ec2 delete-internet-gateway --region ${{ env.AWS_REGION }} --internet-gateway-id "$igw_id" || true
+                fi
+              done
+              
+              # Delete subnets
+              aws ec2 describe-subnets --region ${{ env.AWS_REGION }} --filters "Name=vpc-id,Values=$vpc_id" --query 'Subnets[].SubnetId' --output text | while read subnet_id; do
+                if [ -n "$subnet_id" ] && [ "$subnet_id" != "None" ]; then
+                  echo "Deleting subnet: $subnet_id"
+                  aws ec2 delete-subnet --region ${{ env.AWS_REGION }} --subnet-id "$subnet_id" || true
+                fi
+              done
+              
+              # Delete route tables (except main)
+              aws ec2 describe-route-tables --region ${{ env.AWS_REGION }} --filters "Name=vpc-id,Values=$vpc_id" --query 'RouteTables[?Associations[0].Main==`false`].RouteTableId' --output text | while read rt_id; do
+                if [ -n "$rt_id" ] && [ "$rt_id" != "None" ]; then
+                  echo "Deleting route table: $rt_id"
+                  aws ec2 delete-route-table --region ${{ env.AWS_REGION }} --route-table-id "$rt_id" || true
+                fi
+              done
+              
+              # Delete security groups (except default)
+              aws ec2 describe-security-groups --region ${{ env.AWS_REGION }} --filters "Name=vpc-id,Values=$vpc_id" --query 'SecurityGroups[?GroupName!=`default`].GroupId' --output text | while read sg_id; do
+                if [ -n "$sg_id" ] && [ "$sg_id" != "None" ]; then
+                  echo "Deleting security group: $sg_id"
+                  aws ec2 delete-security-group --region ${{ env.AWS_REGION }} --group-id "$sg_id" || true
+                fi
+              done
+              
+              # Finally delete the VPC
+              echo "Deleting VPC: $vpc_id"
+              aws ec2 delete-vpc --region ${{ env.AWS_REGION }} --vpc-id "$vpc_id" && echo "✅ Deleted VPC: $vpc_id" || echo "❌ Failed to delete VPC: $vpc_id"
+            done
+          else
+            echo "No existing text2agent VPCs found"
+          fi
+          
+          echo "🎯 VPC cleanup completed!"
 
       - name: Terraform Fresh Plan and Apply
         run: |
