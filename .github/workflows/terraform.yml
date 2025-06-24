@@ -183,7 +183,8 @@ jobs:
           terraform output -json > infrastructure-outputs.json
           echo "## 🧪 TEST Infrastructure Deployed (Simplified) 🚀" >> $GITHUB_STEP_SUMMARY
           echo "### Resources Created (Testing Mode):" >> $GITHUB_STEP_SUMMARY
-          echo "- **Simple Lambda Function**: $(terraform output -raw simple_lambda_function_name)" >> $GITHUB_STEP_SUMMARY
+          echo "- **First Lambda Function**: $(terraform output -raw simple_lambda_function_name)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Second Lambda Function**: $(terraform output -raw second_lambda_function_name)" >> $GITHUB_STEP_SUMMARY
           echo "- **Lambda Role**: $(terraform output -raw simple_lambda_role_arn)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### ⚠️ Testing Mode Active" >> $GITHUB_STEP_SUMMARY

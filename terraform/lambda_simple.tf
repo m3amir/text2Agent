@@ -51,4 +51,30 @@ resource "aws_lambda_function" "simple_test_function" {
   depends_on = [
     aws_iam_role_policy_attachment.simple_lambda_basic_execution,
   ]
+}
+
+# Second test Lambda function to verify idempotent behavior
+resource "aws_lambda_function" "second_test_function" {
+  filename      = "post_confirmation.zip" # Reusing existing zip file
+  function_name = "text2Agent-Second-Test"
+  role          = aws_iam_role.simple_lambda_execution_role.arn
+  handler       = "index.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 60 # Different timeout to make it distinct
+
+  environment {
+    variables = {
+      ENVIRONMENT = var.environment
+      PROJECT     = var.project_name
+      FUNCTION    = "second-test"
+    }
+  }
+
+  tags = {
+    Name = "text2Agent-Second-Test"
+  }
+
+  depends_on = [
+    aws_iam_role_policy_attachment.simple_lambda_basic_execution,
+  ]
 } 
