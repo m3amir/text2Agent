@@ -53,7 +53,7 @@ resource "aws_subnet" "private" {
 
 # NAT Gateways - Using single NAT for cost optimization
 resource "aws_eip" "nat" {
-  count  = 1  # Only create one NAT Gateway to reduce costs and EIP usage
+  count  = 1 # Only create one NAT Gateway to reduce costs and EIP usage
   domain = "vpc"
 
   tags = {
@@ -64,9 +64,9 @@ resource "aws_eip" "nat" {
 }
 
 resource "aws_nat_gateway" "main" {
-  count         = 1  # Single NAT Gateway for cost optimization
+  count         = 1 # Single NAT Gateway for cost optimization
   allocation_id = aws_eip.nat[0].id
-  subnet_id     = aws_subnet.public[0].id  # Use first public subnet
+  subnet_id     = aws_subnet.public[0].id # Use first public subnet
 
   tags = {
     Name = "${var.project_name}-${var.environment}-nat"
@@ -95,7 +95,7 @@ resource "aws_route_table" "private" {
 
   route {
     cidr_block     = "0.0.0.0/0"
-    nat_gateway_id = aws_nat_gateway.main[0].id  # All private subnets use single NAT
+    nat_gateway_id = aws_nat_gateway.main[0].id # All private subnets use single NAT
   }
 
   tags = {
