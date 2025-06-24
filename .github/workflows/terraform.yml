@@ -543,4 +543,4 @@ jobs:
           echo "- IAM Roles and Policies" >> $GITHUB_STEP_SUMMARY
           echo "- VPC and Networking Components" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "🎯 **All AWS resources have been safely removed.**" >> $GITHUB_STEP_SUMMARY 
+          echo "🎯 **All AWS resources have been safely removed.**" >> $GITHUB_STEP_SUMMARY
