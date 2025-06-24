@@ -82,7 +82,12 @@ jobs:
           ./setup_terraform_backend.sh
 
       - name: Terraform Init
-        run: terraform init
+        run: |
+          terraform init \
+            -backend-config="bucket=text2agent-terraform-state-eu-west-2" \
+            -backend-config="key=text2agent/production/terraform.tfstate" \
+            -backend-config="region=eu-west-2" \
+            -backend-config="encrypt=true"
 
       - name: Terraform Plan
         run: |
@@ -153,7 +158,12 @@ jobs:
           ./setup_terraform_backend.sh
 
       - name: Terraform Init
-        run: terraform init
+        run: |
+          terraform init \
+            -backend-config="bucket=text2agent-terraform-state-eu-west-2" \
+            -backend-config="key=text2agent/production/terraform.tfstate" \
+            -backend-config="region=eu-west-2" \
+            -backend-config="encrypt=true"
 
       - name: Handle Existing Resources
         run: |
@@ -354,7 +364,12 @@ jobs:
           ./setup_terraform_backend.sh
 
       - name: Terraform Init
-        run: terraform init
+        run: |
+          terraform init \
+            -backend-config="bucket=text2agent-terraform-state-eu-west-2" \
+            -backend-config="key=text2agent/production/terraform.tfstate" \
+            -backend-config="region=eu-west-2" \
+            -backend-config="encrypt=true"
 
       - name: Verify State
         run: |
