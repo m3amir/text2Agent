@@ -1,3 +1,5 @@
+# ORIGINAL LAMBDA - TEMPORARILY COMMENTED OUT FOR TESTING
+/*
 # IAM Role for Lambda Functions
 resource "aws_iam_role" "lambda_execution_role" {
   name = "${var.project_name}-${var.environment}-lambda-role"
@@ -174,4 +176,5 @@ resource "aws_lambda_permission" "allow_cognito_invoke" {
   function_name = aws_lambda_function.post_confirmation.function_name
   principal     = "cognito-idp.amazonaws.com"
   source_arn    = aws_cognito_user_pool.main.arn
-} 
+}
+*/

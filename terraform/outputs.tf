@@ -1,3 +1,5 @@
+# ORIGINAL OUTPUTS - TEMPORARILY COMMENTED OUT FOR TESTING
+/*
 # VPC Outputs
 output "vpc_id" {
   description = "ID of the VPC"
@@ -235,4 +237,5 @@ output "lambda_function_name" {
 output "lambda_function_arn" {
   description = "ARN of the Lambda function"
   value       = aws_lambda_function.post_confirmation.arn
-} 
+}
+*/

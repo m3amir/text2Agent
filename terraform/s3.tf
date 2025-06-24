@@ -1,3 +1,5 @@
+# S3 - TEMPORARILY COMMENTED OUT FOR TESTING
+/*
 # Random suffix to ensure bucket name uniqueness
 resource "random_id" "bucket_suffix" {
   byte_length = 4
@@ -47,4 +49,5 @@ resource "aws_s3_bucket_public_access_block" "str_data_store_pab" {
   block_public_policy     = true
   ignore_public_acls      = true
   restrict_public_buckets = true
-} 
+}
+*/

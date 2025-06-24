@@ -133,4 +133,5 @@ resource "random_string" "cognito_domain_suffix" {
   length  = 8
   special = false
   upper   = false
-} 
+}
+*/

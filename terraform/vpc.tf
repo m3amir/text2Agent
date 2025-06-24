@@ -8,7 +8,8 @@ resource "random_id" "vpc_suffix" {
   byte_length = 3
 }
 
-# VPC
+# VPC - TEMPORARILY COMMENTED OUT FOR TESTING
+/* 
 resource "aws_vpc" "main" {
   cidr_block           = var.vpc_cidr
   enable_dns_hostnames = true
@@ -119,4 +120,5 @@ resource "aws_route_table_association" "private" {
   count          = length(var.private_subnet_cidrs)
   subnet_id      = aws_subnet.private[count.index].id
   route_table_id = aws_route_table.private[count.index].id
-} 
+}
+*/

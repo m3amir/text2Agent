@@ -61,11 +61,7 @@ jobs:
 
       - name: Terraform Init
         run: |
-          terraform init \
-            -backend-config="bucket=text2agent-terraform-state-eu-west-2" \
-            -backend-config="key=text2agent/production/terraform.tfstate" \
-            -backend-config="region=eu-west-2" \
-            -backend-config="encrypt=true"
+          terraform init
 
       - name: Terraform Validate
         run: terraform validate
@@ -102,11 +98,7 @@ jobs:
 
       - name: Terraform Init
         run: |
-          terraform init \
-            -backend-config="bucket=text2agent-terraform-state-eu-west-2" \
-            -backend-config="key=text2agent/production/terraform.tfstate" \
-            -backend-config="region=eu-west-2" \
-            -backend-config="encrypt=true"
+          terraform init
 
       - name: Terraform Plan
         run: |
@@ -178,11 +170,7 @@ jobs:
 
       - name: Terraform Init
         run: |
-          terraform init \
-            -backend-config="bucket=text2agent-terraform-state-eu-west-2" \
-            -backend-config="key=text2agent/production/terraform.tfstate" \
-            -backend-config="region=eu-west-2" \
-            -backend-config="encrypt=true"
+          terraform init
 
       - name: Terraform Apply
         run: |
@@ -193,21 +181,13 @@ jobs:
       - name: Generate Outputs
         run: |
           terraform output -json > infrastructure-outputs.json
-          echo "## Infrastructure Deployed 🚀" >> $GITHUB_STEP_SUMMARY
-          echo "### Key Resources Created:" >> $GITHUB_STEP_SUMMARY
-          echo "- **Main RDS Cluster**: $(terraform output -raw rds_cluster_id)" >> $GITHUB_STEP_SUMMARY
-          echo "- **Bedrock RDS Cluster**: $(terraform output -raw bedrock_rds_cluster_id)" >> $GITHUB_STEP_SUMMARY
-          echo "- **S3 Bucket**: $(terraform output -raw str_data_store_bucket_id)" >> $GITHUB_STEP_SUMMARY
-          
-          # Handle Bedrock Knowledge Base output safely
-          if terraform output bedrock_knowledge_base_id &>/dev/null; then
-            echo "- **Bedrock Knowledge Base**: $(terraform output -raw bedrock_knowledge_base_id)" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "- **Bedrock Knowledge Base**: ⚠️ Creation pending (check Bedrock model access)" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          echo "- **VPC ID**: $(terraform output -raw vpc_id)" >> $GITHUB_STEP_SUMMARY
-          echo "- **Cognito User Pool**: $(terraform output -raw cognito_user_pool_id)" >> $GITHUB_STEP_SUMMARY
+          echo "## 🧪 TEST Infrastructure Deployed (Simplified) 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "### Resources Created (Testing Mode):" >> $GITHUB_STEP_SUMMARY
+          echo "- **Simple Lambda Function**: $(terraform output -raw simple_lambda_function_name)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Lambda Role**: $(terraform output -raw simple_lambda_role_arn)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### ⚠️ Testing Mode Active" >> $GITHUB_STEP_SUMMARY
+          echo "Heavy resources (VPC, RDS, S3, Cognito, Bedrock) are temporarily commented out for faster testing." >> $GITHUB_STEP_SUMMARY
 
       - name: Upload Infrastructure Outputs
         uses: actions/upload-artifact@v4
@@ -340,11 +320,7 @@ jobs:
 
       - name: Terraform Init
         run: |
-          terraform init \
-            -backend-config="bucket=text2agent-terraform-state-eu-west-2" \
-            -backend-config="key=text2agent/production/terraform.tfstate" \
-            -backend-config="region=eu-west-2" \
-            -backend-config="encrypt=true"
+          terraform init
 
       - name: Verify State and Resources
         run: |
@@ -389,21 +365,18 @@ jobs:
           terraform state list || echo "✅ State is empty - all resources destroyed"
           
           echo ""
-          echo "Checking for any remaining resources in AWS..."
-          aws ec2 describe-vpcs --filters "Name=tag:Project,Values=text2agent" --query 'Vpcs[*].[VpcId,Tags[?Key==`Name`].Value|[0]]' --output table || echo "No VPCs found"
-          aws rds describe-db-clusters --query 'DBClusters[?starts_with(DBClusterIdentifier, `text2agent`)].DBClusterIdentifier' --output table || echo "No RDS clusters found"
+          echo "Checking for Lambda functions..."
+          aws lambda list-functions --query 'Functions[?starts_with(FunctionName, `text2Agent`)].FunctionName' --output table || echo "No Lambda functions found"
 
       - name: Destroy Summary
         run: |
-          echo "## Infrastructure Destroyed 💥" >> $GITHUB_STEP_SUMMARY
-          echo "✅ All AWS resources have been removed" >> $GITHUB_STEP_SUMMARY
+          echo "## 🧪 TEST Infrastructure Destroyed 💥" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Simple Lambda resources have been removed" >> $GITHUB_STEP_SUMMARY
           echo "✅ Terraform state is clean" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Resources that were destroyed:" >> $GITHUB_STEP_SUMMARY
-          echo "- VPC and networking components" >> $GITHUB_STEP_SUMMARY
-          echo "- RDS Aurora clusters (main and bedrock)" >> $GITHUB_STEP_SUMMARY
-          echo "- S3 buckets and data" >> $GITHUB_STEP_SUMMARY
-          echo "- Lambda functions" >> $GITHUB_STEP_SUMMARY
-          echo "- IAM roles and policies" >> $GITHUB_STEP_SUMMARY
-          echo "- Cognito user pools" >> $GITHUB_STEP_SUMMARY
-          echo "- Bedrock Knowledge Base" >> $GITHUB_STEP_SUMMARY
+          echo "### Resources that were destroyed (Testing Mode):" >> $GITHUB_STEP_SUMMARY
+          echo "- Simple Lambda function" >> $GITHUB_STEP_SUMMARY
+          echo "- Lambda IAM role and policies" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### ⚠️ Note:" >> $GITHUB_STEP_SUMMARY
+          echo "Heavy resources were not deployed in this test run." >> $GITHUB_STEP_SUMMARY

@@ -1,3 +1,5 @@
+# RDS - TEMPORARILY COMMENTED OUT FOR TESTING
+/*
 # Random password for RDS
 resource "random_password" "db_password" {
   length           = 16
@@ -168,3 +170,4 @@ resource "aws_rds_cluster_instance" "bedrock" {
 # Note: Bedrock Knowledge Base will automatically handle database setup
 # including creating the knowledge_base database, pgvector extension, 
 # bedrock_integration schema, tables, and required user permissions 
+*/

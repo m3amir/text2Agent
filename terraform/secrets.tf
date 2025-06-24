@@ -1,3 +1,5 @@
+# SECRETS - TEMPORARILY COMMENTED OUT FOR TESTING
+/*
 # Store database password in AWS Secrets Manager
 resource "random_id" "secret_suffix" {
   byte_length = 4
@@ -21,4 +23,5 @@ resource "aws_secretsmanager_secret_version" "db_password" {
     port     = aws_rds_cluster.main.port
     dbname   = var.db_name
   })
-} 
+}
+*/

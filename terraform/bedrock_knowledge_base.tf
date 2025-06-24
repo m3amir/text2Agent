@@ -1,3 +1,5 @@
+# BEDROCK KNOWLEDGE BASE - TEMPORARILY COMMENTED OUT FOR TESTING
+/*
 # Data source to check available Bedrock models
 data "aws_bedrock_foundation_models" "available" {
   by_provider = "Amazon"
@@ -16,51 +18,51 @@ resource "random_id" "kb_suffix" {
 }
 
 # Enable Bedrock Model Access
-resource "null_resource" "enable_bedrock_models" {
-  provisioner "local-exec" {
-    command = <<-EOT
-      echo "🔧 Enabling Bedrock model access..."
-      
-      # Check if models are already enabled
-      aws bedrock list-foundation-models \
-        --region ${var.aws_region} \
-        ${var.aws_profile != "" ? "--profile ${var.aws_profile}" : ""} \
-        --output table || echo "Bedrock service not accessible"
-      
-      # Enable Amazon Titan Embed Text V2 model
-      aws bedrock put-model-invocation-logging-configuration \
-        --region ${var.aws_region} \
-        ${var.aws_profile != "" ? "--profile ${var.aws_profile}" : ""} \
-        --logging-config '{}' || echo "Model logging config already set"
-      
-      # Note: Model access must be requested manually via AWS Console
-      # Go to: https://${var.aws_region}.console.aws.amazon.com/bedrock/home?region=${var.aws_region}#/modelaccess
-      echo "⚠️  IMPORTANT: If this is your first time using Bedrock, you need to:"
-      echo "   1. Go to AWS Bedrock Console > Model access"
-      echo "   2. Request access to 'Amazon Titan Text Embeddings V2'"
-      echo "   3. Wait for approval (usually instant)"
-      echo "   4. Re-run terraform apply"
-      
-      # Verify model access
-      sleep 5
-      aws bedrock invoke-model \
-        --region ${var.aws_region} \
-        ${var.aws_profile != "" ? "--profile ${var.aws_profile}" : ""} \
-        --model-id amazon.titan-embed-text-v2:0 \
-        --body '{"inputText":"test"}' \
-        --content-type application/json \
-        --accept application/json \
-        /tmp/bedrock-test-output.json && echo "✅ Bedrock model access verified!" || echo "❌ Model access not yet enabled - please enable in AWS Console"
-      
-      rm -f /tmp/bedrock-test-output.json
-    EOT
-  }
-
-  triggers = {
-    # Run this check every time
-    always_run = timestamp()
-  }
-}
+# # resource "null_resource" "enable_bedrock_models" {
+#   provisioner "local-exec" {
+#     command = <<-EOT
+#       echo "🔧 Enabling Bedrock model access..."
+#       
+#       # Check if models are already enabled
+#       aws bedrock list-foundation-models \
+#         --region ${var.aws_region} \
+#         ${var.aws_profile != "" ? "--profile ${var.aws_profile}" : ""} \
+#         --output table || echo "Bedrock service not accessible"
+#       
+#       # Enable Amazon Titan Embed Text V2 model
+#       aws bedrock put-model-invocation-logging-configuration \
+#         --region ${var.aws_region} \
+#         ${var.aws_profile != "" ? "--profile ${var.aws_profile}" : ""} \
+#         --logging-config '{}' || echo "Model logging config already set"
+#       
+#       # Note: Model access must be requested manually via AWS Console
+#       # Go to: https://${var.aws_region}.console.aws.amazon.com/bedrock/home?region=${var.aws_region}#/modelaccess
+#       echo "⚠️  IMPORTANT: If this is your first time using Bedrock, you need to:"
+#       echo "   1. Go to AWS Bedrock Console > Model access"
+#       echo "   2. Request access to 'Amazon Titan Text Embeddings V2'"
+#       echo "   3. Wait for approval (usually instant)"
+#       echo "   4. Re-run terraform apply"
+#       
+#       # Verify model access
+#       sleep 5
+#       aws bedrock invoke-model \
+#         --region ${var.aws_region} \
+#         ${var.aws_profile != "" ? "--profile ${var.aws_profile}" : ""} \
+#         --model-id amazon.titan-embed-text-v2:0 \
+#         --body '{"inputText":"test"}' \
+#         --content-type application/json \
+#         --accept application/json \
+#         /tmp/bedrock-test-output.json && echo "✅ Bedrock model access verified!" || echo "❌ Model access not yet enabled - please enable in AWS Console"
+#       
+#       rm -f /tmp/bedrock-test-output.json
+#     EOT
+#   }
+# 
+#   triggers = {
+#     # Run this check every time
+#     always_run = timestamp()
+#   }
+# }
 
 # IAM Role for Bedrock Knowledge Base
 resource "aws_iam_role" "bedrock_kb_role" {
@@ -311,8 +313,7 @@ resource "aws_bedrockagent_knowledge_base" "main" {
     aws_iam_role_policy_attachment.bedrock_model_attachment,
     aws_iam_role_policy_attachment.bedrock_rds_attachment,
     aws_secretsmanager_secret_version.bedrock_kb_secret,
-    null_resource.bedrock_db_setup,
-    null_resource.enable_bedrock_models
+    null_resource.bedrock_db_setup
   ]
 }
 
@@ -423,5 +424,6 @@ USING gin (custom_metadata);
 SELECT 'Bedrock Knowledge Base database setup completed successfully!' as status;
 EOT
 }
+*/
 
  
