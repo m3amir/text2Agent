@@ -147,6 +147,20 @@ jobs:
         run: |
           echo "🧹 Checking and cleaning existing conflicting resources..."
           
+          # Only run cleanup in development environments
+          if [ "${{ vars.ENVIRONMENT }}" = "prod" ] || [ "${{ vars.ENVIRONMENT }}" = "production" ]; then
+            echo "🚫 PRODUCTION ENVIRONMENT DETECTED - Skipping destructive cleanup!"
+            echo "⚠️  For production, manually resolve resource conflicts using:"
+            echo "   - terraform import for existing resources"
+            echo "   - terraform state commands for state management"
+            echo "   - Manual resource cleanup if absolutely necessary"
+            echo ""
+            echo "Existing resources should be imported rather than deleted."
+            exit 1
+          fi
+          
+          echo "✅ Development environment detected - proceeding with cleanup..."
+          
           # Function to safely delete IAM role with policies
           delete_iam_role() {
             local role_name=$1
@@ -299,12 +313,45 @@ jobs:
           
           echo "🎯 VPC cleanup completed!"
 
-      - name: Terraform Fresh Plan and Apply
+      - name: Handle Resource Conflicts (Production-Safe)
         run: |
-          echo "🔄 Creating fresh Terraform plan after cleanup..."
-          terraform plan -out=fresh-tfplan -var="aws_region=${{ env.AWS_REGION }}" -var="aws_profile="
+          echo "🔄 Creating Terraform plan..."
+          terraform plan -out=fresh-tfplan -var="aws_region=${{ env.AWS_REGION }}" -var="aws_profile=" || {
+            echo "❌ Plan failed - checking for import opportunities..."
+            
+            # For production environments, suggest imports instead of cleanup
+            if [ "${{ vars.ENVIRONMENT }}" = "prod" ] || [ "${{ vars.ENVIRONMENT }}" = "production" ]; then
+              echo ""
+              echo "🔧 PRODUCTION CONFLICT RESOLUTION GUIDE:"
+              echo "========================================"
+              echo ""
+              echo "1. Import existing IAM roles:"
+              echo "   terraform import aws_iam_role.bedrock_kb_role text2agent-prod-bedrock-kb-role"
+              echo "   terraform import aws_iam_role.rds_enhanced_monitoring text2agent-prod-rds-monitoring-role"
+              echo "   terraform import aws_iam_role.lambda_execution_role text2agent-prod-lambda-role"
+              echo ""
+              echo "2. Import existing IAM policies:"
+              ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+              echo "   terraform import aws_iam_policy.bedrock_model_policy arn:aws:iam::${ACCOUNT_ID}:policy/text2agent-prod-bedrock-model-policy"
+              echo "   terraform import aws_iam_policy.bedrock_rds_policy arn:aws:iam::${ACCOUNT_ID}:policy/text2agent-prod-bedrock-rds-policy"
+              echo ""
+              echo "3. Import existing DB subnet group:"
+              echo "   terraform import aws_db_subnet_group.main text2agent-prod-db-subnet-group"
+              echo ""
+              echo "4. Import existing VPC (if any):"
+              echo "   terraform import aws_vpc.main vpc-xxxxxxxxx"
+              echo ""
+              echo "5. After imports, run 'terraform plan' to see remaining changes"
+              echo ""
+              exit 1
+            fi
+            
+            # For development, we can still clean up
+            echo "Development environment - plan failed, will proceed with cleanup approach"
+            exit 1
+          }
           
-          echo "🚀 Applying fresh Terraform configuration..."
+          echo "🚀 Applying Terraform configuration..."
           terraform apply -auto-approve fresh-tfplan
 
       - name: Generate Outputs
