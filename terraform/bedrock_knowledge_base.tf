@@ -270,7 +270,7 @@ resource "null_resource" "bedrock_db_setup" {
 
 # Bedrock Knowledge Base
 resource "aws_bedrockagent_knowledge_base" "main" {
-  name     = "${var.project_name}-${var.environment}-knowledge-base"
+  name     = "STR-DATA-VECTOR-STORE"
   role_arn = aws_iam_role.bedrock_kb_role.arn
 
   knowledge_base_configuration {
@@ -302,7 +302,7 @@ resource "aws_bedrockagent_knowledge_base" "main" {
   }
 
   tags = {
-    Name = "${var.project_name}-${var.environment}-knowledge-base"
+    Name = "STR-DATA-VECTOR-STORE"
   }
 
   depends_on = [

@@ -26,8 +26,76 @@ env:
   AWS_REGION: us-west-2
 
 jobs:
+  tests:
+    name: 'Run Tests Before Infrastructure Deployment'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio pytest-mock
+          
+          # Install MCP dependencies explicitly
+          echo "🔧 Installing MCP dependencies..."
+          pip install mcp mcp-server langchain-mcp-adapters
+          
+          # Verify MCP installation
+          python -c "import mcp; print('✅ MCP package installed successfully')" || echo "❌ MCP package installation failed"
+
+      - name: Set up environment variables
+        env:
+          # Microsoft Graph API (optional)
+          MICROSOFT_TENANT_ID: ${{ secrets.MICROSOFT_TENANT_ID }}
+          MICROSOFT_CLIENT_ID: ${{ secrets.MICROSOFT_CLIENT_ID }}
+          MICROSOFT_CLIENT_SECRET: ${{ secrets.MICROSOFT_CLIENT_SECRET }}
+          MICROSOFT_SITE_URL: ${{ secrets.MICROSOFT_SITE_URL }}
+          # AWS credentials for real testing
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+        run: |
+          echo "Setting up Docker for MCP tests..."
+          
+          # Docker is pre-installed on GitHub Actions runners
+          docker --version
+          docker info
+          
+          # Ensure Docker service is running
+          sudo systemctl start docker || echo "Docker already running"
+          
+          # Test Docker functionality
+          docker run --rm hello-world
+          
+          echo "✅ Docker is ready for MCP tests"
+
+      - name: Run Core Tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+        run: |
+          echo "🧪 Running core test suite before terraform deployment..."
+          echo "Testing critical components required for infrastructure..."
+          
+          # Run essential tests that validate components needed for infrastructure
+          python -m pytest Tests/skeleton/test.py -v --tb=short -s
+          python -m pytest Tests/prompts/ -v --tb=short -s
+          
+          echo "✅ Core tests passed - proceeding with infrastructure deployment"
   terraform-check:
     name: 'Terraform Format and Validate'
+    needs: tests
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -111,7 +179,7 @@ jobs:
 
   terraform-apply:
     name: 'Terraform Apply'
-    needs: [terraform-check, terraform-plan]
+    needs: [tests, terraform-check, terraform-plan]
     runs-on: ubuntu-latest
     if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feature/IAC') && (github.event_name == 'push' || github.event.inputs.action == 'apply')
     defaults:
