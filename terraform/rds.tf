@@ -59,14 +59,23 @@ resource "aws_rds_cluster" "main" {
   db_subnet_group_name   = aws_db_subnet_group.main.name
   vpc_security_group_ids = [aws_security_group.rds.id]
 
-  backup_retention_period      = 7
+  backup_retention_period      = var.environment == "prod" ? 30 : 7
   preferred_backup_window      = "03:00-04:00"
   preferred_maintenance_window = "sun:04:00-sun:05:00"
 
   storage_encrypted        = true
-  deletion_protection      = false
-  skip_final_snapshot      = true
-  delete_automated_backups = true
+  deletion_protection      = var.environment == "prod" ? true : false
+  skip_final_snapshot      = var.environment == "dev" ? true : false
+  final_snapshot_identifier = var.environment == "dev" ? null : "${var.project_name}-main-final-snapshot-${formatdate("YYYYMMDD-hhmm", timestamp())}"
+  delete_automated_backups = var.environment == "dev" ? true : false
+
+  # Production protection lifecycle
+  lifecycle {
+    prevent_destroy = false # Set to true for production manually
+    ignore_changes = [
+      master_password, # Prevent password drift
+    ]
+  }
 
   # Enable Data API
   enable_http_endpoint = true

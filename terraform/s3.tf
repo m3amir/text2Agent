@@ -5,13 +5,13 @@ resource "random_id" "bucket_suffix" {
 
 # STR Data Store Bucket with unique naming
 resource "aws_s3_bucket" "str_data_store" {
-  bucket = "${var.project_name}-${var.environment}-str-data-store-${random_id.bucket_suffix.hex}"
+  bucket = "${var.project_name}-${var.environment}-str-data-store-${random_id.bucket_suffix.hex}-PROD"
 
   # Force destroy to allow deletion even if bucket contains objects
   force_destroy = true
 
   tags = {
-    Name        = "${var.project_name}-${var.environment}-str-data-store"
+    Name        = "${var.project_name}-${var.environment}-str-data-store-PROD"
     Environment = var.environment
     Project     = var.project_name
   }
