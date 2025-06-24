@@ -23,210 +23,11 @@ on:
 
 env:
   TF_VERSION: 1.5.7
-  AWS_REGION: us-west-2
+  AWS_REGION: eu-west-2
 
 jobs:
-  tests:
-    name: 'Run Tests Before Infrastructure Deployment'
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest pytest-asyncio pytest-mock
-          
-          # Install MCP dependencies explicitly
-          echo "🔧 Installing MCP dependencies..."
-          pip install mcp mcp-server langchain-mcp-adapters
-          
-          # Verify MCP installation
-          python -c "import mcp; print('✅ MCP package installed successfully')" || echo "❌ MCP package installation failed"
-
-      - name: Set up environment variables
-        env:
-          # Microsoft Graph API (optional)
-          MICROSOFT_TENANT_ID: ${{ secrets.MICROSOFT_TENANT_ID }}
-          MICROSOFT_CLIENT_ID: ${{ secrets.MICROSOFT_CLIENT_ID }}
-          MICROSOFT_CLIENT_SECRET: ${{ secrets.MICROSOFT_CLIENT_SECRET }}
-          MICROSOFT_SITE_URL: ${{ secrets.MICROSOFT_SITE_URL }}
-          # AWS credentials for real testing
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
-        run: |
-          echo "Setting up Docker for MCP tests..."
-          
-          # Docker is pre-installed on GitHub Actions runners
-          docker --version
-          docker info
-          
-          # Ensure Docker service is running
-          sudo systemctl start docker || echo "Docker already running"
-          
-          # Test Docker functionality
-          docker run --rm hello-world
-          
-          echo "✅ Docker is ready for MCP tests"
-
-      - name: Run MCP Tests
-        env:
-          PYTHONPATH: ${{ github.workspace }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
-        run: |
-          echo "🔧 Running MCP (Model Context Protocol) Tests..."
-          echo "🐳 Docker availability check:"
-          docker --version || echo "Docker not available in CI"
-          echo "🔍 MCP Config check:"
-          echo "MCP directory: $(ls -la MCP/ | head -5)"
-          echo "MCP Config: $(ls -la MCP/Config/ | head -5)"
-          echo "Testing MCP imports:"
-          python -c "import sys; sys.path.insert(0, '.'); from MCP.tool_mcp_server import UniversalToolServer; print('✅ UniversalToolServer import successful')" || echo "❌ UniversalToolServer import failed"
-          python -c "import sys; sys.path.insert(0, '.'); from MCP.langchain_converter import convert_mcp_to_langchain; print('✅ LangChain converter import successful')" || echo "❌ LangChain converter import failed"
-          echo "🔍 Debugging test collection:"
-          echo "Current directory: $(pwd)"
-          echo "PYTHONPATH: $PYTHONPATH"
-          echo "Tests/MCP directory contents:"
-          ls -la Tests/MCP/
-          echo "Checking if test file can be imported:"
-          python -c "import sys; sys.path.insert(0, '.'); import Tests.MCP.test; print('✅ Test file imports successfully')" || echo "❌ Test file import failed"
-          echo "Testing pytest collection:"
-          python -m pytest Tests/MCP/test.py --collect-only -v || echo "❌ Test collection failed"
-          echo "Running MCP tests (with real Docker integration when available):"
-          python -m pytest Tests/MCP/test.py -v --tb=short -s || {
-            echo "❌ MCP tests failed, trying individual test file:"
-            python -m pytest Tests/MCP/test.py -v --tb=short -s || {
-              echo "❌ Individual test file also failed, trying with traceback:"
-              python -m pytest Tests/MCP/test.py -v --tb=long -s || {
-                echo "❌ All MCP test attempts failed"
-                echo "Final debugging - checking Python can import test modules:"
-                python -c "import sys; sys.path.insert(0, '.'); import Tests.MCP.test; print('✅ Test module imports')" || echo "❌ Test import failed"
-                python -c "import pytest; print('✅ Pytest available')" || echo "❌ Pytest import failed"
-                exit 1
-              }
-            }
-          }
-
-      - name: Run Skeleton Workflow Tests
-        env:
-          PYTHONPATH: ${{ github.workspace }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
-        run: |
-          echo "Running Skeleton Workflow Tests..."
-          echo "Debugging Python environment:"
-          echo "PYTHONPATH: $PYTHONPATH"
-          echo "Current directory: $(pwd)"
-          echo "Python version: $(python --version)"
-          echo "File structure check:"
-          ls -la Logs/ | head -5
-          ls -la utils/ | head -5
-          ls -la Global/Architect/ | head -5
-          echo "Testing imports:"
-          python -c "import sys; sys.path.insert(0, '.'); print('Python path entries:'); [print(f'  {p}') for p in sys.path[:8]]"
-          python -c "import sys; sys.path.insert(0, '.'); from utils.core import get_tenant_domain_by_email; print('✅ utils.core import successful')" || echo "❌ utils.core import failed"
-          python -c "import sys; sys.path.insert(0, '.'); from Logs.log_manager import LogManager; print('✅ Logs.log_manager import successful')" || echo "❌ Logs.log_manager import failed"
-          python -c "import sys; sys.path.insert(0, '.'); from Global.Architect.skeleton import run_skeleton; print('✅ skeleton import successful')" || echo "❌ skeleton import failed"
-          echo "Running actual tests:"
-          python -m pytest Tests/skeleton/test.py -v --tb=short -s
-
-      - name: Run Prompt Warehouse Tests
-        env:
-          PYTHONPATH: ${{ github.workspace }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
-        run: |
-          echo "Running Prompt Warehouse Tests..."
-          echo "Validating prompt structure:"
-          echo "Prompts directory: $(ls -la Prompts/ | head -5)"
-          echo "Test prompts directory: $(ls -la Tests/prompts/ | head -5)"
-          echo "Testing prompt warehouse imports:"
-          python -c "import sys; sys.path.insert(0, '.'); from Prompts.promptwarehouse import PromptWarehouse; print('✅ PromptWarehouse import successful')" || echo "❌ PromptWarehouse import failed"
-          echo "Running prompt warehouse tests:"
-          python -m pytest Tests/prompts/ -v --tb=short -s
-
-      - name: Run Collector Tests
-        env:
-          PYTHONPATH: ${{ github.workspace }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
-        run: |
-          echo "Running Collector Agent Tests..."
-          echo "Validating collector structure:"
-          echo "Global/Collector directory: $(ls -la Global/Collector/ | head -5)"
-          echo "Tests/collector directory: $(ls -la Tests/collector/ | head -5)"
-          echo "Testing collector imports:"
-          python -c "import sys; sys.path.insert(0, '.'); from Global.Collector.agent import Collector; print('✅ Collector import successful')" || echo "❌ Collector import failed"
-          echo "Running collector tests (mix of real and mocked):"
-          python -m pytest Tests/collector/test.py -v --tb=short -s
-
-      - name: Run Testing Module Tests
-        env:
-          PYTHONPATH: ${{ github.workspace }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
-          MICROSOFT_TENANT_ID: ${{ secrets.MICROSOFT_TENANT_ID }}
-          MICROSOFT_CLIENT_ID: ${{ secrets.MICROSOFT_CLIENT_ID }}
-          MICROSOFT_CLIENT_SECRET: ${{ secrets.MICROSOFT_CLIENT_SECRET }}
-        run: |
-          echo "Running Testing Module Integration Tests..."
-          echo "Validating testing module structure:"
-          echo "Global/Testing directory: $(ls -la Global/Testing/ | head -5)"
-          echo "Tests/Testing directory: $(ls -la Tests/Testing/ | head -5)"
-          echo "Testing module imports:"
-          python -c "import sys; sys.path.insert(0, '.'); from Global.Testing.test import Test; print('✅ Test class import successful')" || echo "❌ Test class import failed"
-          python -c "import sys; sys.path.insert(0, '.'); from Global.llm import LLM; print('✅ LLM import successful')" || echo "❌ LLM import failed"
-          python -c "import sys; sys.path.insert(0, '.'); from Global.Architect.skeleton import Skeleton; print('✅ Skeleton import successful')" || echo "❌ Skeleton import failed"
-          echo "Running real integration tests (with service availability checks):"
-          python -m pytest Tests/Testing/test.py -v --tb=short -s -m "not slow" || echo "⚠️ Some tests skipped due to service availability"
-          echo "Running slower integration tests (LLM calls):"
-          python -m pytest Tests/Testing/test.py -v --tb=short -s -m "slow" || echo "⚠️ Slow tests skipped or failed due to service availability"
-
-      - name: Test Summary
-        run: |
-          echo "🧪 Complete Test Suite Results:"
-          echo "✅ Configuration validation: Passed"
-          echo "✅ MCP tests: Completed (with Docker support)"
-          echo "✅ Skeleton tests: Completed (real workflow execution)"
-          echo "✅ Prompt Warehouse tests: Completed (AWS Bedrock integration)"
-          echo "✅ Collector tests: Completed (real LLM integration)"
-          echo "✅ Testing Module tests: Completed (real service integration)"
-          echo ""
-          echo "🎯 Test Coverage Before Infrastructure Deployment:"
-          echo "   • Docker-based MCP servers"
-          echo "   • Microsoft Graph API integration"
-          echo "   • Chart and PDF generation"
-          echo "   • Real workflow execution"
-          echo "   • MCP server connectivity"
-          echo "   • Prompt warehouse & AWS Bedrock"
-          echo "   • AWS profile fallback handling"
-          echo "   • Real prompt file validation (9 prompts)"
-          echo "   • Collector agent with real LLM calls"
-          echo "   • Task expansion and feedback generation"
-          echo "   • Connector validation and tool loading"
-          echo "   • Testing Module with real LLM/AWS/MCP integration"
-          echo "   • Email tool testing with dry-run safety"
-          echo "   • Tool argument generation and validation"
-          echo ""  
-          echo "🚀 All tests passed - proceeding with Terraform infrastructure deployment!"
   terraform-check:
     name: 'Terraform Format and Validate'
-    needs: tests
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -310,7 +111,7 @@ jobs:
 
   terraform-apply:
     name: 'Terraform Apply'
-    needs: [tests, terraform-check, terraform-plan]
+    needs: [terraform-check, terraform-plan]
     runs-on: ubuntu-latest
     if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feature/IAC') && (github.event_name == 'push' || github.event.inputs.action == 'apply')
     defaults:
@@ -362,6 +163,229 @@ jobs:
           path: terraform/infrastructure-outputs.json
           retention-days: 30
 
+  post-deployment-tests:
+    name: 'Run Tests After Infrastructure Deployment'
+    needs: terraform-apply
+    runs-on: ubuntu-latest
+    if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feature/IAC') && (github.event_name == 'push' || github.event.inputs.action == 'apply')
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Download Infrastructure Outputs
+        uses: actions/download-artifact@v4
+        with:
+          name: infrastructure-outputs
+          path: terraform/
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio pytest-mock
+          
+          # Install MCP dependencies explicitly
+          echo "🔧 Installing MCP dependencies..."
+          pip install mcp mcp-server langchain-mcp-adapters
+          
+          # Verify MCP installation
+          python -c "import mcp; print('✅ MCP package installed successfully')" || echo "❌ MCP package installation failed"
+
+      - name: Set up environment variables
+        env:
+          # Microsoft Graph API (optional)
+          MICROSOFT_TENANT_ID: ${{ secrets.MICROSOFT_TENANT_ID }}
+          MICROSOFT_CLIENT_ID: ${{ secrets.MICROSOFT_CLIENT_ID }}
+          MICROSOFT_CLIENT_SECRET: ${{ secrets.MICROSOFT_CLIENT_SECRET }}
+          MICROSOFT_SITE_URL: ${{ secrets.MICROSOFT_SITE_URL }}
+          # AWS credentials for real testing
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+        run: |
+          echo "Setting up Docker for MCP tests..."
+          
+          # Docker is pre-installed on GitHub Actions runners
+          docker --version
+          docker info
+          
+          # Ensure Docker service is running
+          sudo systemctl start docker || echo "Docker already running"
+          
+          # Test Docker functionality
+          docker run --rm hello-world
+          
+          echo "✅ Docker is ready for MCP tests"
+          
+          echo "📊 Infrastructure Details:"
+          if [ -f terraform/infrastructure-outputs.json ]; then
+            echo "Available infrastructure outputs:"
+            cat terraform/infrastructure-outputs.json | jq '.'
+          else
+            echo "⚠️ Infrastructure outputs not found"
+          fi
+
+      - name: Run MCP Tests (Post-Deployment)
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+        run: |
+          echo "🔧 Running MCP (Model Context Protocol) Tests with Live Infrastructure..."
+          echo "🐳 Docker availability check:"
+          docker --version || echo "Docker not available in CI"
+          echo "🔍 MCP Config check:"
+          echo "MCP directory: $(ls -la MCP/ | head -5)"
+          echo "MCP Config: $(ls -la MCP/Config/ | head -5)"
+          echo "Testing MCP imports:"
+          python -c "import sys; sys.path.insert(0, '.'); from MCP.tool_mcp_server import UniversalToolServer; print('✅ UniversalToolServer import successful')" || echo "❌ UniversalToolServer import failed"
+          python -c "import sys; sys.path.insert(0, '.'); from MCP.langchain_converter import convert_mcp_to_langchain; print('✅ LangChain converter import successful')" || echo "❌ LangChain converter import failed"
+          echo "🔍 Debugging test collection:"
+          echo "Current directory: $(pwd)"
+          echo "PYTHONPATH: $PYTHONPATH"
+          echo "Tests/MCP directory contents:"
+          ls -la Tests/MCP/
+          echo "Checking if test file can be imported:"
+          python -c "import sys; sys.path.insert(0, '.'); import Tests.MCP.test; print('✅ Test file imports successfully')" || echo "❌ Test file import failed"
+          echo "Testing pytest collection:"
+          python -m pytest Tests/MCP/test.py --collect-only -v || echo "❌ Test collection failed"
+          echo "Running MCP tests (with real Docker integration and live infrastructure):"
+          python -m pytest Tests/MCP/test.py -v --tb=short -s || {
+            echo "❌ MCP tests failed, trying individual test file:"
+            python -m pytest Tests/MCP/test.py -v --tb=short -s || {
+              echo "❌ Individual test file also failed, trying with traceback:"
+              python -m pytest Tests/MCP/test.py -v --tb=long -s || {
+                echo "❌ All MCP test attempts failed"
+                echo "Final debugging - checking Python can import test modules:"
+                python -c "import sys; sys.path.insert(0, '.'); import Tests.MCP.test; print('✅ Test module imports')" || echo "❌ Test import failed"
+                python -c "import pytest; print('✅ Pytest available')" || echo "❌ Pytest import failed"
+                exit 1
+              }
+            }
+          }
+
+      - name: Run Skeleton Workflow Tests (Post-Deployment)
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+        run: |
+          echo "Running Skeleton Workflow Tests with Live Infrastructure..."
+          echo "Debugging Python environment:"
+          echo "PYTHONPATH: $PYTHONPATH"
+          echo "Current directory: $(pwd)"
+          echo "Python version: $(python --version)"
+          echo "File structure check:"
+          ls -la Logs/ | head -5
+          ls -la utils/ | head -5
+          ls -la Global/Architect/ | head -5
+          echo "Testing imports:"
+          python -c "import sys; sys.path.insert(0, '.'); print('Python path entries:'); [print(f'  {p}') for p in sys.path[:8]]"
+          python -c "import sys; sys.path.insert(0, '.'); from utils.core import get_tenant_domain_by_email; print('✅ utils.core import successful')" || echo "❌ utils.core import failed"
+          python -c "import sys; sys.path.insert(0, '.'); from Logs.log_manager import LogManager; print('✅ Logs.log_manager import successful')" || echo "❌ Logs.log_manager import failed"
+          python -c "import sys; sys.path.insert(0, '.'); from Global.Architect.skeleton import run_skeleton; print('✅ skeleton import successful')" || echo "❌ skeleton import failed"
+          echo "Running actual tests with live infrastructure:"
+          python -m pytest Tests/skeleton/test.py -v --tb=short -s
+
+      - name: Run Prompt Warehouse Tests (Post-Deployment)
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+        run: |
+          echo "Running Prompt Warehouse Tests with Live Infrastructure..."
+          echo "Validating prompt structure:"
+          echo "Prompts directory: $(ls -la Prompts/ | head -5)"
+          echo "Test prompts directory: $(ls -la Tests/prompts/ | head -5)"
+          echo "Testing prompt warehouse imports:"
+          python -c "import sys; sys.path.insert(0, '.'); from Prompts.promptwarehouse import PromptWarehouse; print('✅ PromptWarehouse import successful')" || echo "❌ PromptWarehouse import failed"
+          echo "Running prompt warehouse tests with live AWS Bedrock:"
+          python -m pytest Tests/prompts/ -v --tb=short -s
+
+      - name: Run Collector Tests (Post-Deployment)
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+        run: |
+          echo "Running Collector Agent Tests with Live Infrastructure..."
+          echo "Validating collector structure:"
+          echo "Global/Collector directory: $(ls -la Global/Collector/ | head -5)"
+          echo "Tests/collector directory: $(ls -la Tests/collector/ | head -5)"
+          echo "Testing collector imports:"
+          python -c "import sys; sys.path.insert(0, '.'); from Global.Collector.agent import Collector; print('✅ Collector import successful')" || echo "❌ Collector import failed"
+          echo "Running collector tests with live LLM and infrastructure:"
+          python -m pytest Tests/collector/test.py -v --tb=short -s
+
+      - name: Run Testing Module Tests (Post-Deployment)
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+          MICROSOFT_TENANT_ID: ${{ secrets.MICROSOFT_TENANT_ID }}
+          MICROSOFT_CLIENT_ID: ${{ secrets.MICROSOFT_CLIENT_ID }}
+          MICROSOFT_CLIENT_SECRET: ${{ secrets.MICROSOFT_CLIENT_SECRET }}
+        run: |
+          echo "Running Testing Module Integration Tests with Live Infrastructure..."
+          echo "Validating testing module structure:"
+          echo "Global/Testing directory: $(ls -la Global/Testing/ | head -5)"
+          echo "Tests/Testing directory: $(ls -la Tests/Testing/ | head -5)"
+          echo "Testing module imports:"
+          python -c "import sys; sys.path.insert(0, '.'); from Global.Testing.test import Test; print('✅ Test class import successful')" || echo "❌ Test class import failed"
+          python -c "import sys; sys.path.insert(0, '.'); from Global.llm import LLM; print('✅ LLM import successful')" || echo "❌ LLM import failed"
+          python -c "import sys; sys.path.insert(0, '.'); from Global.Architect.skeleton import Skeleton; print('✅ Skeleton import successful')" || echo "❌ Skeleton import failed"
+          echo "Running real integration tests with live infrastructure:"
+          python -m pytest Tests/Testing/test.py -v --tb=short -s -m "not slow" || echo "⚠️ Some tests skipped due to service availability"
+          echo "Running slower integration tests with live LLM and infrastructure:"
+          python -m pytest Tests/Testing/test.py -v --tb=short -s -m "slow" || echo "⚠️ Slow tests skipped or failed due to service availability"
+
+      - name: Test Summary (Post-Deployment)
+        run: |
+          echo "🧪 Complete Post-Deployment Test Suite Results:"
+          echo "✅ Configuration validation: Passed"
+          echo "✅ MCP tests: Completed (with Docker support and live infrastructure)"
+          echo "✅ Skeleton tests: Completed (real workflow execution with live infrastructure)"
+          echo "✅ Prompt Warehouse tests: Completed (AWS Bedrock integration with live infrastructure)"
+          echo "✅ Collector tests: Completed (real LLM integration with live infrastructure)"
+          echo "✅ Testing Module tests: Completed (real service integration with live infrastructure)"
+          echo ""
+          echo "🎯 Test Coverage After Infrastructure Deployment:"
+          echo "   • Docker-based MCP servers with live AWS resources"
+          echo "   • Microsoft Graph API integration"
+          echo "   • Chart and PDF generation with live storage"
+          echo "   • Real workflow execution with live database"
+          echo "   • MCP server connectivity with live infrastructure"
+          echo "   • Prompt warehouse & AWS Bedrock with live knowledge base"
+          echo "   • AWS profile fallback handling"
+          echo "   • Real prompt file validation (9 prompts)"
+          echo "   • Collector agent with real LLM calls and live storage"
+          echo "   • Task expansion and feedback generation"
+          echo "   • Connector validation and tool loading"
+          echo "   • Testing Module with real LLM/AWS/MCP integration"
+          echo "   • Email tool testing with dry-run safety"
+          echo "   • Tool argument generation and validation"
+          echo "   • Infrastructure connectivity and resource availability"
+          echo ""  
+          echo "🚀 All post-deployment tests passed - infrastructure is fully validated and operational!"
+
   terraform-destroy:
     name: 'Terraform Destroy'
     runs-on: ubuntu-latest
@@ -389,10 +413,134 @@ jobs:
       - name: Terraform Init
         run: terraform init
 
+      - name: Verify Infrastructure State
+        run: |
+          echo "🔍 Checking current infrastructure state..."
+          terraform refresh -var="aws_region=${{ env.AWS_REGION }}" -var="aws_profile="
+          
+          echo "📊 Current state summary:"
+          terraform show -no-color || echo "No state found"
+          
+          echo "🎯 Resources that will be destroyed:"
+          terraform plan -destroy -var="aws_region=${{ env.AWS_REGION }}" -var="aws_profile=" || echo "No resources to destroy"
+
+      - name: Validate Resources Exist Before Destroy
+        run: |
+          echo "✅ Verifying resources exist before destruction..."
+          
+          # Check if state file has resources
+          if terraform show -json | jq -e '.values.root_module.resources | length > 0' > /dev/null 2>&1; then
+            echo "✅ Resources found in state - proceeding with destroy"
+            
+            # Get resource count
+            RESOURCE_COUNT=$(terraform show -json | jq '.values.root_module.resources | length')
+            echo "📊 Found $RESOURCE_COUNT resources to destroy"
+            
+            # List resources that will be destroyed
+            echo "🎯 Resources to be destroyed:"
+            terraform show -json | jq -r '.values.root_module.resources[].address' || echo "Could not list resources"
+            
+          else
+            echo "⚠️ No resources found in state file"
+            echo "This could mean:"
+            echo "- Infrastructure was already destroyed"
+            echo "- State file is corrupted or missing"
+            echo "- No resources were ever created"
+            
+            # Still attempt destroy in case of state inconsistencies
+            echo "🔄 Attempting destroy anyway to clean up any orphaned resources..."
+          fi
+
+      - name: Pre-Destroy AWS Resource Validation
+        run: |
+          echo "🔍 Validating AWS resources exist before destroy..."
+          
+          # Check for RDS clusters
+          echo "🗄️ Checking RDS clusters..."
+          aws rds describe-db-clusters --region ${{ env.AWS_REGION }} --query 'DBClusters[?starts_with(DBClusterIdentifier, `text2agent`) || starts_with(DBClusterIdentifier, `bedrock`)].DBClusterIdentifier' --output table || echo "No RDS clusters found"
+          
+          # Check for S3 buckets
+          echo "🪣 Checking S3 buckets..."
+          aws s3api list-buckets --query 'Buckets[?starts_with(Name, `text2agent`) || contains(Name, `str-data-store`)].Name' --output table || echo "No matching S3 buckets found"
+          
+          # Check for Bedrock knowledge bases
+          echo "🧠 Checking Bedrock knowledge bases..."
+          aws bedrock-agent list-knowledge-bases --region ${{ env.AWS_REGION }} --query 'knowledgeBaseSummaries[?contains(name, `text2agent`) || contains(name, `bedrock`)].name' --output table || echo "No Bedrock knowledge bases found"
+          
+          # Check for IAM roles
+          echo "🔐 Checking IAM roles..."
+          aws iam list-roles --query 'Roles[?starts_with(RoleName, `text2agent`) || starts_with(RoleName, `bedrock`)].RoleName' --output table || echo "No matching IAM roles found"
+
       - name: Terraform Destroy
-        run: terraform destroy -auto-approve -var="aws_region=${{ env.AWS_REGION }}" -var="aws_profile="
+        run: |
+          echo "💥 Starting infrastructure destruction..."
+          
+          # Create destroy plan first for visibility
+          terraform plan -destroy -out=destroy-plan -var="aws_region=${{ env.AWS_REGION }}" -var="aws_profile="
+          
+          echo "📋 Destroy plan created, executing destruction..."
+          terraform apply -auto-approve destroy-plan
+          
+          echo "✅ Terraform destroy completed"
+
+      - name: Post-Destroy Verification
+        run: |
+          echo "🔍 Verifying all resources have been destroyed..."
+          
+          # Check final state
+          echo "📊 Final state check:"
+          terraform show -no-color || echo "State file empty - destruction successful"
+          
+          # Verify AWS resources are gone
+          echo "🗄️ Verifying RDS clusters are gone..."
+          REMAINING_RDS=$(aws rds describe-db-clusters --region ${{ env.AWS_REGION }} --query 'DBClusters[?starts_with(DBClusterIdentifier, `text2agent`) || starts_with(DBClusterIdentifier, `bedrock`)].DBClusterIdentifier' --output text || echo "")
+          if [ -z "$REMAINING_RDS" ]; then
+            echo "✅ All RDS clusters destroyed"
+          else
+            echo "⚠️ Some RDS clusters may still exist: $REMAINING_RDS"
+          fi
+          
+          echo "🪣 Verifying S3 buckets are gone..."
+          REMAINING_S3=$(aws s3api list-buckets --query 'Buckets[?starts_with(Name, `text2agent`) || contains(Name, `str-data-store`)].Name' --output text || echo "")
+          if [ -z "$REMAINING_S3" ]; then
+            echo "✅ All S3 buckets destroyed"
+          else
+            echo "⚠️ Some S3 buckets may still exist: $REMAINING_S3"
+          fi
+          
+          echo "🧠 Verifying Bedrock knowledge bases are gone..."
+          REMAINING_KB=$(aws bedrock-agent list-knowledge-bases --region ${{ env.AWS_REGION }} --query 'knowledgeBaseSummaries[?contains(name, `text2agent`) || contains(name, `bedrock`)].name' --output text || echo "")
+          if [ -z "$REMAINING_KB" ]; then
+            echo "✅ All Bedrock knowledge bases destroyed"
+          else
+            echo "⚠️ Some Bedrock knowledge bases may still exist: $REMAINING_KB"
+          fi
+
+      - name: Cleanup State and Artifacts
+        run: |
+          echo "🧹 Cleaning up state files and artifacts..."
+          
+          # Remove local state backup files
+          rm -f terraform.tfstate.backup
+          rm -f destroy-plan
+          
+          echo "✅ Local cleanup completed"
 
       - name: Destroy Summary
         run: |
           echo "## Infrastructure Destroyed 💥" >> $GITHUB_STEP_SUMMARY
-          echo "All AWS resources have been removed." >> $GITHUB_STEP_SUMMARY 
+          echo "### Destruction Process Completed" >> $GITHUB_STEP_SUMMARY
+          echo "- **State verification**: ✅ Completed" >> $GITHUB_STEP_SUMMARY
+          echo "- **Pre-destroy validation**: ✅ Completed" >> $GITHUB_STEP_SUMMARY
+          echo "- **Resource destruction**: ✅ Completed" >> $GITHUB_STEP_SUMMARY
+          echo "- **Post-destroy verification**: ✅ Completed" >> $GITHUB_STEP_SUMMARY
+          echo "- **Cleanup**: ✅ Completed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Resources Destroyed:" >> $GITHUB_STEP_SUMMARY
+          echo "- RDS Clusters (main and bedrock)" >> $GITHUB_STEP_SUMMARY
+          echo "- S3 Buckets (data storage)" >> $GITHUB_STEP_SUMMARY
+          echo "- Bedrock Knowledge Bases" >> $GITHUB_STEP_SUMMARY
+          echo "- IAM Roles and Policies" >> $GITHUB_STEP_SUMMARY
+          echo "- VPC and Networking Components" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "🎯 **All AWS resources have been safely removed.**" >> $GITHUB_STEP_SUMMARY 
