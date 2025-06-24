@@ -1,12 +1,3 @@
-# ORIGINAL LAMBDA - TEMPORARILY COMMENTED OUT FOR TESTING
-# This file has been temporarily commented out for faster testing
-# All resources in this file depend on VPC, RDS, S3, Cognito, and Secrets Manager
-# which are also commented out. To restore, uncomment the block below and 
-# uncomment the dependencies in other .tf files.
-
-# Uncomment the block below to restore original Lambda functionality:
-# /*
-# IAM Role for Lambda Functions
 # resource "aws_iam_role" "lambda_execution_role" {
 #   name = "${var.project_name}-${var.environment}-lambda-role"
 #   assume_role_policy = jsonencode({
@@ -173,4 +164,3 @@
 #   principal     = "cognito-idp.amazonaws.com"
 #   source_arn    = aws_cognito_user_pool.main.arn
 # }
-# */
