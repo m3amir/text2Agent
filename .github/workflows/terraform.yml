@@ -202,7 +202,13 @@ jobs:
           echo "- **Main RDS Cluster**: $(terraform output -raw rds_cluster_id)" >> $GITHUB_STEP_SUMMARY
           echo "- **Bedrock RDS Cluster**: $(terraform output -raw bedrock_rds_cluster_id)" >> $GITHUB_STEP_SUMMARY
           echo "- **S3 Bucket**: $(terraform output -raw str_data_store_bucket_id)" >> $GITHUB_STEP_SUMMARY
-          echo "- **Bedrock Knowledge Base**: $(terraform output -raw bedrock_knowledge_base_id)" >> $GITHUB_STEP_SUMMARY
+          
+          # Handle Bedrock Knowledge Base output safely
+          if terraform output bedrock_knowledge_base_id &>/dev/null; then
+            echo "- **Bedrock Knowledge Base**: $(terraform output -raw bedrock_knowledge_base_id)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **Bedrock Knowledge Base**: ⚠️ Creation pending (check Bedrock model access)" >> $GITHUB_STEP_SUMMARY
+          fi
 
       - name: Upload Infrastructure Outputs
         uses: actions/upload-artifact@v4
