@@ -246,19 +246,34 @@ resource "null_resource" "db_schema_init" {
         --sql 'CREATE OR REPLACE FUNCTION update_updated_at_column() RETURNS TRIGGER AS $$ BEGIN NEW.updated_at = CURRENT_TIMESTAMP; RETURN NEW; END; $$ language '"'"'plpgsql'"'"';' \
         --region ${var.aws_region}
 
+      # Drop existing triggers (ignore errors)
+      aws rds-data execute-statement \
+        --resource-arn "${aws_rds_cluster.main.arn}" \
+        --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
+        --database "${aws_rds_cluster.main.database_name}" \
+        --sql 'DROP TRIGGER IF EXISTS update_tenantmappings_updated_at ON "Tenants"."tenantmappings";' \
+        --region ${var.aws_region} || true
+
+      aws rds-data execute-statement \
+        --resource-arn "${aws_rds_cluster.main.arn}" \
+        --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
+        --database "${aws_rds_cluster.main.database_name}" \
+        --sql 'DROP TRIGGER IF EXISTS update_users_updated_at ON "Tenants"."users";' \
+        --region ${var.aws_region} || true
+
       # Create triggers
       aws rds-data execute-statement \
         --resource-arn "${aws_rds_cluster.main.arn}" \
         --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
         --database "${aws_rds_cluster.main.database_name}" \
-        --sql 'DROP TRIGGER IF EXISTS update_tenantmappings_updated_at ON "Tenants"."tenantmappings"; CREATE TRIGGER update_tenantmappings_updated_at BEFORE UPDATE ON "Tenants"."tenantmappings" FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();' \
+        --sql 'CREATE TRIGGER update_tenantmappings_updated_at BEFORE UPDATE ON "Tenants"."tenantmappings" FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();' \
         --region ${var.aws_region}
 
       aws rds-data execute-statement \
         --resource-arn "${aws_rds_cluster.main.arn}" \
         --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
         --database "${aws_rds_cluster.main.database_name}" \
-        --sql 'DROP TRIGGER IF EXISTS update_users_updated_at ON "Tenants"."users"; CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON "Tenants"."users" FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();' \
+        --sql 'CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON "Tenants"."users" FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();' \
         --region ${var.aws_region}
     EOF
   }

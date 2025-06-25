@@ -118,7 +118,7 @@ resource "aws_lambda_function" "post_confirmation" {
       FUNCTION       = "post-confirmation"
       Tenent_db      = var.database_host
       DB_SECRET_NAME = "${var.project_name}-${var.environment}-db-credentials-v2"
-      AWS_REGION     = var.aws_region
+      DB_REGION      = var.aws_region
     }
   }
 
