@@ -44,10 +44,9 @@ def lambda_handler(event, context):
             print(f"Tenant already exists with ID: {existing_tenant_id}")
             tenant_bucket = generate_bucket_name(existing_tenant_id, domain)
             
-            # Only add mapping if user doesn't already exist
-            if not tenant_mapping_exists(email):
-                save_tenant_to_db(domain, email, existing_tenant_id)
-                insert_user_to_db(email, existing_tenant_id)
+            # Only add user if user doesn't already exist
+            if not user_exists(email):
+                insert_user_to_db(email, name, existing_tenant_id)
             else:
                 print(f"User {email} already exists in tenant {existing_tenant_id}")
         else:
@@ -59,8 +58,8 @@ def lambda_handler(event, context):
             # Create bucket first
             if create_tenant_bucket(tenant_bucket):
                 # Only save to DB if bucket creation succeeded
-                save_tenant_to_db(domain, email, generated_uuid)
-                insert_user_to_db(email, generated_uuid)
+                save_tenant_to_db(domain, generated_uuid)
+                insert_user_to_db(email, name, generated_uuid)
             else:
                 print(f"ERROR: Failed to create bucket {tenant_bucket}, skipping DB operations")
                 return event
@@ -115,7 +114,7 @@ def tenant_exists(domain):
         )
         cursor = connection.cursor()
 
-        query = "SELECT tenant FROM \"Tenants\".tenantmappings WHERE domain = %s LIMIT 1;"
+        query = "SELECT tenant_id FROM \"Tenants\".tenantmappings WHERE domain = %s LIMIT 1;"
         cursor.execute(query, (domain,))
         result = cursor.fetchone()
 
@@ -126,9 +125,9 @@ def tenant_exists(domain):
         print(f"Error checking tenant existence: {e}")
         return None
 
-def tenant_mapping_exists(email):
+def user_exists(email):
     """
-    Check if a user already has a tenant mapping
+    Check if a user already exists in the users table
     """
     try:
         username, password = getCredentials()
@@ -140,7 +139,7 @@ def tenant_mapping_exists(email):
         )
         cursor = connection.cursor()
 
-        query = "SELECT 1 FROM \"Tenants\".tenantmappings WHERE email = %s;"
+        query = "SELECT 1 FROM \"Tenants\".users WHERE email = %s;"
         cursor.execute(query, (email,))
         result = cursor.fetchone()
 
@@ -148,7 +147,7 @@ def tenant_mapping_exists(email):
         connection.close()
         return True if result else False
     except Exception as e:
-        print(f"Error checking tenant mapping for email {email}: {e}")
+        print(f"Error checking user existence for email {email}: {e}")
         return False
 
 def create_tenant_bucket(bucket_name):
@@ -241,7 +240,7 @@ def add_bucket_security_policy(bucket_name):
     except Exception as e:
         print(f"ERROR applying security policies to bucket '{bucket_name}': {e}")
 
-def save_tenant_to_db(domain, email, tenant_id):
+def save_tenant_to_db(domain, tenant_id):
     """
     Save tenant mapping to database
     """
@@ -255,20 +254,23 @@ def save_tenant_to_db(domain, email, tenant_id):
         )
         cursor = connection.cursor()
 
+        # Generate bucket name for this tenant
+        tenant_bucket = generate_bucket_name(tenant_id, domain)
+        
         insert_query = """
-            INSERT INTO "Tenants".tenantmappings (domain, email, tenant)
+            INSERT INTO "Tenants".tenantmappings (tenant_id, domain, bucket_name)
             VALUES (%s, %s, %s);
         """
-        cursor.execute(insert_query, (domain, email, tenant_id))
+        cursor.execute(insert_query, (tenant_id, domain, tenant_bucket))
         connection.commit()
 
-        print(f"Record for email '{email}' inserted successfully with tenant ID '{tenant_id}'.")
+        print(f"Tenant mapping inserted successfully: tenant_id='{tenant_id}', domain='{domain}', bucket='{tenant_bucket}'")
         cursor.close()
         connection.close()
     except Exception as e:
         print(f"Error inserting record for email '{email}': {e}")
 
-def insert_user_to_db(email, tenant_id):
+def insert_user_to_db(email, name, tenant_id):
     """
     Insert user record to database
     """
@@ -282,18 +284,18 @@ def insert_user_to_db(email, tenant_id):
         )
         cursor = connection.cursor()
 
-        email_prefix = email.split('@')[0]
-        uid = f"{email_prefix}_{tenant_id}"
-
+        # Generate user_id (UUID format)
+        user_id = str(uuid.uuid4())
+        
         insert_query = """
-            INSERT INTO "Tenants".users (uid, email)
-            VALUES (%s, %s)
-            ON CONFLICT (uid) DO NOTHING;
+            INSERT INTO "Tenants".users (user_id, email, name, tenant_id)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (email) DO NOTHING;
         """
-        cursor.execute(insert_query, (uid, email))
+        cursor.execute(insert_query, (user_id, email, name or email.split('@')[0], tenant_id))
         connection.commit()
 
-        print(f"User record inserted: UID='{uid}', Email='{email}'")
+        print(f"User record inserted: user_id='{user_id}', email='{email}', tenant_id='{tenant_id}'")
         cursor.close()
         connection.close()
     except Exception as e:
