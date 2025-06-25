@@ -90,11 +90,14 @@ resource "aws_iam_role_policy" "lambda_secrets_policy" {
   })
 }
 
-# Use public Lambda Layer for psycopg2
-# This layer provides psycopg2 library for PostgreSQL connectivity
-# ARN for eu-west-2: arn:aws:lambda:eu-west-2:898466741470:layer:psycopg2-py38:1
-locals {
-  psycopg2_layer_arn = "arn:aws:lambda:${var.aws_region}:898466741470:layer:psycopg2-py311:2"
+# Lambda Layer for psycopg2 (PostgreSQL adapter)
+resource "aws_lambda_layer_version" "psycopg2_layer" {
+  filename         = "psycopg2-layer.zip"
+  layer_name       = "${var.project_name}-${var.environment}-psycopg2-layer"
+  description      = "psycopg2 library for PostgreSQL connectivity"
+  source_code_hash = filebase64sha256("psycopg2-layer.zip")
+
+  compatible_runtimes = ["python3.11", "python3.12"]
 }
 
 # Post Confirmation Lambda for Cognito
@@ -107,7 +110,7 @@ resource "aws_lambda_function" "post_confirmation" {
   timeout       = 60
 
   # Add the psycopg2 layer
-  layers = [local.psycopg2_layer_arn]
+  layers = [aws_lambda_layer_version.psycopg2_layer.arn]
 
   environment {
     variables = {
