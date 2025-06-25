@@ -30,6 +30,42 @@ resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
+# CloudWatch Log Group for Lambda
+resource "aws_cloudwatch_log_group" "post_confirmation_logs" {
+  name              = "/aws/lambda/text2Agent-Post-Confirmation"
+  retention_in_days = 14
+
+  tags = {
+    Name = "${var.project_name}-${var.environment}-lambda-logs"
+  }
+}
+
+# Additional IAM policy for S3 access (if needed for bucket operations)
+resource "aws_iam_role_policy" "lambda_s3_policy" {
+  name = "${var.project_name}-${var.environment}-lambda-s3-policy"
+  role = aws_iam_role.lambda_execution_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:CreateBucket",
+          "s3:PutObject",
+          "s3:GetObject",
+          "s3:ListBucket",
+          "s3:HeadBucket"
+        ]
+        Resource = [
+          "arn:aws:s3:::tenant-*",
+          "arn:aws:s3:::tenant-*/*"
+        ]
+      }
+    ]
+  })
+}
+
 # Post Confirmation Lambda for Cognito
 resource "aws_lambda_function" "post_confirmation" {
   filename      = var.lambda_zip_path
@@ -51,15 +87,38 @@ resource "aws_lambda_function" "post_confirmation" {
     Name = "text2Agent-Post-Confirmation"
   }
 
-  depends_on = [aws_iam_role_policy_attachment.lambda_basic_execution]
+  depends_on = [
+    aws_iam_role_policy_attachment.lambda_basic_execution,
+    aws_cloudwatch_log_group.post_confirmation_logs
+  ]
 }
 
 # Cognito User Pool
 resource "aws_cognito_user_pool" "main" {
   name                     = "${var.project_name}-${var.environment}-user-pool"
-  alias_attributes         = ["email"]
+  username_attributes      = ["email"]
   auto_verified_attributes = ["email"]
 
+  # Standard attributes for name and email
+  schema {
+    attribute_data_type = "String"
+    name                = "email"
+    required            = true
+    mutable             = true
+  }
+
+  schema {
+    attribute_data_type = "String"
+    name                = "name"
+    required            = true
+    mutable             = true
+    string_attribute_constraints {
+      min_length = 1
+      max_length = 256
+    }
+  }
+
+  # Custom attribute for user tier
   schema {
     attribute_data_type = "String"
     name                = "user_tier"
@@ -149,12 +208,14 @@ resource "aws_cognito_user_pool_client" "main" {
   read_attributes = [
     "email",
     "email_verified",
+    "name",
     "preferred_username",
     "custom:user_tier"
   ]
 
   write_attributes = [
     "email",
+    "name",
     "preferred_username",
     "custom:user_tier"
   ]
