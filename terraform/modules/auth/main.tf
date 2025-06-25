@@ -30,15 +30,7 @@ resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
-# CloudWatch Log Group for Lambda
-resource "aws_cloudwatch_log_group" "post_confirmation_logs" {
-  name              = "/aws/lambda/text2Agent-Post-Confirmation"
-  retention_in_days = 14
-
-  tags = {
-    Name = "${var.project_name}-${var.environment}-lambda-logs"
-  }
-}
+# CloudWatch Log Group will be created automatically by Lambda with default settings
 
 # Additional IAM policy for S3 access (if needed for bucket operations)
 resource "aws_iam_role_policy" "lambda_s3_policy" {
@@ -88,8 +80,7 @@ resource "aws_lambda_function" "post_confirmation" {
   }
 
   depends_on = [
-    aws_iam_role_policy_attachment.lambda_basic_execution,
-    aws_cloudwatch_log_group.post_confirmation_logs
+    aws_iam_role_policy_attachment.lambda_basic_execution
   ]
 }
 
