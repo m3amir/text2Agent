@@ -37,9 +37,26 @@ def lambda_handler(event, context):
 
         # Check if tenant bucket exists, if not create it
         tenant_id = get_or_create_tenant(domain)
-        tenant_bucket = f"tenant-{tenant_id}-{domain.replace('.', '-')}"
         
-        print(f"Using tenant bucket: {tenant_bucket}")
+        # Create a safe bucket name (S3 bucket names must be globally unique and follow strict rules)
+        import re
+        safe_domain = re.sub(r'[^a-z0-9-]', '-', domain.lower())
+        safe_domain = re.sub(r'-+', '-', safe_domain).strip('-')
+        
+        # Shorten if too long (S3 bucket names max 63 chars)
+        tenant_bucket = f"text2agent-{tenant_id}-{safe_domain}"
+        if len(tenant_bucket) > 63:
+            tenant_bucket = f"text2agent-{tenant_id}"[:63]
+        
+        # Ensure bucket name ends with alphanumeric (not hyphen)
+        tenant_bucket = tenant_bucket.rstrip('-')
+        
+        # Validate bucket name
+        if len(tenant_bucket) < 3:
+            tenant_bucket = f"text2agent-{tenant_id}"
+        
+        print(f"Using tenant bucket: {tenant_bucket} (length: {len(tenant_bucket)})")
+        print(f"Bucket name validation: starts_with_letter={tenant_bucket[0].isalpha()}, ends_with_alnum={tenant_bucket[-1].isalnum()}")
         
         # Create user folders in the tenant bucket
         create_user_folders(tenant_bucket, email)
@@ -64,12 +81,20 @@ def get_or_create_tenant(domain):
         # For now, create a deterministic UUID based on domain
         # In production, this would check the database first
         import hashlib
+        import re
         
-        # Create a deterministic UUID based on domain
-        domain_hash = hashlib.md5(domain.encode()).hexdigest()[:8]
-        tenant_id = f"{domain_hash}-{str(uuid.uuid4())[:8]}"
+        # Clean domain name for bucket naming (remove dots, make lowercase)
+        clean_domain = re.sub(r'[^a-z0-9-]', '-', domain.lower())
+        clean_domain = re.sub(r'-+', '-', clean_domain)  # Remove multiple hyphens
+        clean_domain = clean_domain.strip('-')  # Remove leading/trailing hyphens
         
-        print(f"Generated tenant ID {tenant_id} for domain {domain}")
+        # Create a deterministic hash based on domain (shorter)
+        domain_hash = hashlib.md5(domain.encode()).hexdigest()[:6]
+        
+        # Create shorter, more reliable tenant ID
+        tenant_id = f"{domain_hash}-{str(uuid.uuid4())[:6]}"
+        
+        print(f"Generated tenant ID {tenant_id} for domain {domain} (cleaned: {clean_domain})")
         return tenant_id
         
     except Exception as e:
@@ -88,23 +113,44 @@ def create_tenant_bucket(bucket_name):
             s3.head_bucket(Bucket=bucket_name)
             print(f"Bucket '{bucket_name}' already exists.")
             return True
-        except s3.exceptions.NoSuchBucket:
-            pass  # Bucket doesn't exist, create it
         except Exception as e:
-            print(f"ERROR checking bucket existence: {e}")
-            return False
+            error_code = getattr(e.response, 'Error', {}).get('Code', 'Unknown') if hasattr(e, 'response') else 'Unknown'
+            if error_code == 'NoSuchBucket' or '404' in str(e):
+                print(f"Bucket '{bucket_name}' doesn't exist, will create it.")
+                pass  # Bucket doesn't exist, create it
+            elif error_code == 'Forbidden' or '403' in str(e):
+                print(f"ERROR: No permission to access bucket '{bucket_name}': {e}")
+                return False
+            else:
+                print(f"ERROR checking bucket existence: {e} (Code: {error_code})")
+                return False
             
         # Create bucket with proper region configuration
         region = os.environ.get('AWS_REGION', 'eu-west-2')
-        if region == 'us-east-1':
-            s3.create_bucket(Bucket=bucket_name)
-        else:
-            s3.create_bucket(
-                Bucket=bucket_name,
-                CreateBucketConfiguration={'LocationConstraint': region}
-            )
+        print(f"Creating bucket '{bucket_name}' in region '{region}'")
+        
+        try:
+            if region == 'us-east-1':
+                s3.create_bucket(Bucket=bucket_name)
+            else:
+                s3.create_bucket(
+                    Bucket=bucket_name,
+                    CreateBucketConfiguration={'LocationConstraint': region}
+                )
+                
+            print(f"Bucket '{bucket_name}' created successfully.")
+        except Exception as create_error:
+            error_code = getattr(create_error.response, 'Error', {}).get('Code', 'Unknown') if hasattr(create_error, 'response') else 'Unknown'
+            print(f"ERROR creating bucket '{bucket_name}': {create_error}")
+            print(f"Error code: {error_code}")
+            print(f"Full error details: {str(create_error)}")
             
-        print(f"Bucket '{bucket_name}' created successfully.")
+            # Check if it's a bucket name issue
+            if 'InvalidBucketName' in str(create_error):
+                print(f"Bucket name '{bucket_name}' is invalid. Length: {len(bucket_name)}")
+                print("S3 bucket naming rules: 3-63 chars, lowercase, no spaces, no dots at start/end")
+            
+            raise create_error
         
         # Add bucket policy for security
         add_bucket_security_policy(bucket_name)
