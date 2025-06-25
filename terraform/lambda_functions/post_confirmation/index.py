@@ -344,11 +344,16 @@ def getCredentials():
     """
     Get database credentials from AWS Secrets Manager
     """
-    secret_name = "rds!db-0534ea7e-2933-421d-96a0-c6d80af7fdc4"
-    region_name = "eu-west-2"
+    secret_name = os.getenv('DB_SECRET_NAME', 'text2agent-dev-db-credentials-v2')
+    region_name = os.getenv('DB_REGION', 'eu-west-2')
     
-    client = boto3.client(service_name='secretsmanager', region_name=region_name)
-    get_secret_value_response = client.get_secret_value(SecretId=secret_name)
-    secret = json.loads(get_secret_value_response['SecretString'])
-    
-    return secret['username'], secret['password'] 
+    try:
+        client = boto3.client(service_name='secretsmanager', region_name=region_name)
+        get_secret_value_response = client.get_secret_value(SecretId=secret_name)
+        secret = json.loads(get_secret_value_response['SecretString'])
+        
+        print(f"Successfully retrieved credentials from secret: {secret_name}")
+        return secret['username'], secret['password']
+    except Exception as e:
+        print(f"Error retrieving credentials from secret '{secret_name}': {e}")
+        raise 

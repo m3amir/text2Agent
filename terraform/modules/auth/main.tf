@@ -80,10 +80,14 @@ resource "aws_iam_role_policy" "lambda_secrets_policy" {
       {
         Effect = "Allow"
         Action = [
-          "secretsmanager:GetSecretValue"
+          "secretsmanager:GetSecretValue",
+          "secretsmanager:DescribeSecret"
         ]
         Resource = [
-          "arn:aws:secretsmanager:${var.aws_region}:*:secret:${var.project_name}-${var.environment}-db-credentials-*"
+          # Custom secret we created
+          "arn:aws:secretsmanager:${var.aws_region}:*:secret:${var.project_name}-${var.environment}-db-credentials-*",
+          # RDS-managed secrets (automatically created by RDS)
+          "arn:aws:secretsmanager:${var.aws_region}:*:secret:rds!*"
         ]
       }
     ]
