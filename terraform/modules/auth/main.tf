@@ -131,6 +131,15 @@ resource "aws_lambda_layer_version" "psycopg2_layer" {
   compatible_runtimes = ["python3.11", "python3.12"]
 }
 
+# Data source for RDS security group
+data "aws_security_group" "rds_sg" {
+  filter {
+    name   = "group-name"
+    values = ["${var.project_name}-${var.environment}-rds-*"]
+  }
+  vpc_id = data.aws_vpc.default.id
+}
+
 # Lambda Security Group for VPC access
 resource "aws_security_group" "lambda_sg" {
   name_prefix = "${var.project_name}-${var.environment}-lambda-"
@@ -148,6 +157,17 @@ resource "aws_security_group" "lambda_sg" {
   }
 }
 
+# Security Group Rule: Allow Lambda to access RDS
+resource "aws_security_group_rule" "lambda_to_rds" {
+  type                     = "ingress"
+  from_port                = 5432
+  to_port                  = 5432
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.lambda_sg.id
+  security_group_id        = data.aws_security_group.rds_sg.id
+  description              = "Allow Lambda access to RDS PostgreSQL"
+}
+
 # Post Confirmation Lambda for Cognito
 resource "aws_lambda_function" "post_confirmation" {
   filename         = var.lambda_zip_path
@@ -155,7 +175,7 @@ resource "aws_lambda_function" "post_confirmation" {
   role             = aws_iam_role.lambda_execution_role.arn
   handler          = "index.lambda_handler"
   runtime          = "python3.11"
-  timeout          = 60
+  timeout          = 120
   description      = "PostConfirmation trigger with Linux-compatible psycopg2 layer"
   source_code_hash = filebase64sha256(var.lambda_zip_path)
 
