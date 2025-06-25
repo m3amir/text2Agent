@@ -181,18 +181,26 @@ jobs:
       - name: Generate Outputs
         run: |
           terraform output -json > infrastructure-outputs.json
-          echo "## 🧪 TEST Infrastructure Deployed (Lambda + Cognito) 🚀" >> $GITHUB_STEP_SUMMARY
-          echo "### Resources Created (Testing Mode):" >> $GITHUB_STEP_SUMMARY
-          echo "- **First Lambda Function**: $(terraform output -raw simple_lambda_function_name)" >> $GITHUB_STEP_SUMMARY
-          echo "- **Second Lambda Function**: $(terraform output -raw second_lambda_function_name)" >> $GITHUB_STEP_SUMMARY
+          echo "## 🏗️ MODULAR Infrastructure Deployed (Lambda + Cognito + S3) 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "### Active Modules:" >> $GITHUB_STEP_SUMMARY
+          echo "- **🔐 Auth Module**: Cognito User Pool + Lambda triggers" >> $GITHUB_STEP_SUMMARY
+          echo "- **📦 Storage Module**: S3 bucket with security configurations" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Resources Created:" >> $GITHUB_STEP_SUMMARY
           echo "- **Post Confirmation Lambda**: $(terraform output -raw post_confirmation_lambda_name)" >> $GITHUB_STEP_SUMMARY
           echo "- **Lambda Role**: $(terraform output -raw lambda_role_arn)" >> $GITHUB_STEP_SUMMARY
           echo "- **Cognito User Pool**: $(terraform output -raw cognito_user_pool_id)" >> $GITHUB_STEP_SUMMARY
           echo "- **Cognito Client**: $(terraform output -raw cognito_user_pool_client_id)" >> $GITHUB_STEP_SUMMARY
           echo "- **Cognito Domain**: $(terraform output -raw cognito_user_pool_domain)" >> $GITHUB_STEP_SUMMARY
+          echo "- **S3 Bucket**: $(terraform output -raw s3_bucket_name)" >> $GITHUB_STEP_SUMMARY
+          echo "- **S3 Bucket ARN**: $(terraform output -raw s3_bucket_arn)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### ⚠️ Testing Mode Active" >> $GITHUB_STEP_SUMMARY
-          echo "Heavy resources (VPC, RDS, S3, Bedrock) are commented out for faster testing." >> $GITHUB_STEP_SUMMARY
+          echo "### 📋 Module Status" >> $GITHUB_STEP_SUMMARY
+          echo "- **✅ Active**: storage, auth" >> $GITHUB_STEP_SUMMARY
+          echo "- **💤 Disabled**: networking, database, security, ai" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔧 Modular Architecture" >> $GITHUB_STEP_SUMMARY
+          echo "Infrastructure is now organized into reusable modules for easy scaling." >> $GITHUB_STEP_SUMMARY
 
       - name: Upload Infrastructure Outputs
         uses: actions/upload-artifact@v4
@@ -282,17 +290,25 @@ jobs:
           echo ""
           echo "Checking for Lambda functions..."
           aws lambda list-functions --query 'Functions[?starts_with(FunctionName, `text2Agent`)].FunctionName' --output table || echo "No Lambda functions found"
+          
+          echo ""
+          echo "Checking for S3 buckets..."
+          aws s3 ls | grep text2agent || echo "No text2agent S3 buckets found"
 
       - name: Destroy Summary
         run: |
-          echo "## 🧪 TEST Infrastructure Destroyed 💥" >> $GITHUB_STEP_SUMMARY
-          echo "✅ Simple Lambda resources have been removed" >> $GITHUB_STEP_SUMMARY
+          echo "## 🏗️ MODULAR Infrastructure Destroyed 💥" >> $GITHUB_STEP_SUMMARY
+          echo "✅ All active module resources have been removed" >> $GITHUB_STEP_SUMMARY
           echo "✅ Terraform state is clean" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Resources that were destroyed (Testing Mode):" >> $GITHUB_STEP_SUMMARY
-          echo "- Simple Lambda function" >> $GITHUB_STEP_SUMMARY
-          echo "- Lambda IAM role and policies" >> $GITHUB_STEP_SUMMARY
+          echo "### Modules Destroyed:" >> $GITHUB_STEP_SUMMARY
+          echo "- **🔐 Auth Module**: Cognito User Pool, Lambda function, IAM roles" >> $GITHUB_STEP_SUMMARY
+          echo "- **📦 Storage Module**: S3 STR Data Store bucket" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### ⚠️ Note:" >> $GITHUB_STEP_SUMMARY
-          echo "Heavy resources were not deployed in this test run." >> $GITHUB_STEP_SUMMARY
+          echo "### 📋 Module Status" >> $GITHUB_STEP_SUMMARY
+          echo "- **❌ Destroyed**: storage, auth" >> $GITHUB_STEP_SUMMARY
+          echo "- **💤 Disabled**: networking, database, security, ai (were not deployed)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔧 Modular Architecture" >> $GITHUB_STEP_SUMMARY
+          echo "Infrastructure modules are ready for future deployment when needed." >> $GITHUB_STEP_SUMMARY
           

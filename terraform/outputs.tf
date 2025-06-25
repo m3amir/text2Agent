@@ -1,124 +1,72 @@
-# output "vpc_id" {
-#   value = aws_vpc.main.id
-# }
-#
-# output "vpc_cidr_block" {
-#   value = aws_vpc.main.cidr_block
-# }
-#
-# output "public_subnet_ids" {
-#   value = aws_subnet.public[*].id
-# }
-#
-# output "private_subnet_ids" {
-#   value = aws_subnet.private[*].id
-# }
+# =====================================================
+# ROOT OUTPUTS - Expose module outputs
+# =====================================================
 
-# STR Data Store S3 Bucket Outputs
-# output "str_data_store_bucket_id" {
-#   value = aws_s3_bucket.str_data_store.id
-# }
-#
-# output "str_data_store_bucket_arn" {
-#   value = aws_s3_bucket.str_data_store.arn
-# }
-#
-# output "str_data_store_bucket_domain_name" {
-#   value = aws_s3_bucket.str_data_store.bucket_domain_name
-# }
-#
-# output "str_data_store_bucket_regional_domain_name" {
-#   value = aws_s3_bucket.str_data_store.bucket_regional_domain_name
-# }
+# Storage Module Outputs
+output "s3_bucket_name" {
+  description = "Name of the S3 bucket"
+  value       = module.storage.s3_bucket_name
+}
 
-# Main Application RDS Aurora Outputs
-# output "rds_cluster_id" {
-#   value = aws_rds_cluster.main.cluster_identifier
-# }
-#
-# output "rds_cluster_endpoint" {
-#   value = aws_rds_cluster.main.endpoint
-# }
-#
-# output "rds_cluster_reader_endpoint" {
-#   value = aws_rds_cluster.main.reader_endpoint
-# }
-#
-# output "rds_cluster_port" {
-#   value = aws_rds_cluster.main.port
-# }
-#
-# output "rds_cluster_database_name" {
-#   value = aws_rds_cluster.main.database_name
-# }
-#
-# output "rds_cluster_master_username" {
-#   value = aws_rds_cluster.main.master_username
-#   sensitive = true
-# }
-#
-# output "rds_cluster_arn" {
-#   value = aws_rds_cluster.main.arn
-# }
-#
-# output "rds_instance_endpoints" {
-#   value = aws_rds_cluster_instance.main[*].endpoint
-# }
-#
-# output "rds_instance_identifiers" {
-#   value = aws_rds_cluster_instance.main[*].identifier
-# }
+output "s3_bucket_arn" {
+  description = "ARN of the S3 bucket"
+  value       = module.storage.s3_bucket_arn
+}
 
-# Bedrock Knowledge Base RDS Aurora Outputs
-# output "bedrock_rds_cluster_id" {
-#   value = aws_rds_cluster.bedrock.cluster_identifier
-# }
-#
-# output "bedrock_rds_cluster_endpoint" {
-#   value = aws_rds_cluster.bedrock.endpoint
-# }
-#
-# output "bedrock_rds_cluster_reader_endpoint" {
-#   value = aws_rds_cluster.bedrock.reader_endpoint
-# }
-#
-# output "bedrock_rds_cluster_port" {
-#   value = aws_rds_cluster.bedrock.port
-# }
-#
-# output "bedrock_rds_cluster_arn" {
-#   value = aws_rds_cluster.bedrock.arn
-# }
-#
-# output "bedrock_rds_instance_endpoints" {
-#   value = aws_rds_cluster_instance.bedrock[*].endpoint
-# }
-#
-# output "bedrock_rds_instance_identifiers" {
-# output "str_data_store_bucket_domain_name" {
-#   value = aws_s3_bucket.str_data_store.bucket_domain_name
-# }
-#
-# output "str_data_store_bucket_regional_domain_name" {
-#   value = aws_s3_bucket.str_data_store.bucket_regional_domain_name
-# }
+output "s3_bucket_domain_name" {
+  description = "Domain name of the S3 bucket"
+  value       = module.storage.s3_bucket_domain_name
+}
 
-# output "rds_instance_identifiers" {
-#   value = aws_rds_cluster_instance.main[*].identifier
-# }
+# Authentication Module Outputs
+output "cognito_user_pool_id" {
+  description = "ID of the Cognito User Pool"
+  value       = module.auth.cognito_user_pool_id
+}
 
-# output "bedrock_knowledge_base_id" {
-#   value = try(aws_bedrockagent_knowledge_base.main.id, "not-created")
-# }
-#
-# output "bedrock_knowledge_base_arn" {
-#   value = try(aws_bedrockagent_knowledge_base.main.arn, "not-created")
-# }
-#
-# output "lambda_function_name" {
-#   value = aws_lambda_function.post_confirmation.function_name
-# }
+output "cognito_user_pool_arn" {
+  description = "ARN of the Cognito User Pool"
+  value       = module.auth.cognito_user_pool_arn
+}
 
-# output "lambda_function_arn" {
-#   value = aws_lambda_function.post_confirmation.arn
-# }
+output "cognito_user_pool_client_id" {
+  description = "ID of the Cognito User Pool Client"
+  value       = module.auth.cognito_user_pool_client_id
+}
+
+output "cognito_user_pool_domain" {
+  description = "Domain of the Cognito User Pool"
+  value       = module.auth.cognito_user_pool_domain
+}
+
+output "post_confirmation_lambda_name" {
+  description = "Name of the post confirmation Lambda function"
+  value       = module.auth.post_confirmation_lambda_name
+}
+
+output "post_confirmation_lambda_arn" {
+  description = "ARN of the post confirmation Lambda function"
+  value       = module.auth.post_confirmation_lambda_arn
+}
+
+output "lambda_role_arn" {
+  description = "ARN of the Lambda execution role"
+  value       = module.auth.lambda_role_arn
+}
+
+# Deployment Information
+output "deployment_info" {
+  description = "Information about the current deployment"
+  value = {
+    mode             = "MODULAR - Lambda + Cognito + S3"
+    environment      = var.environment
+    project          = var.project_name
+    region           = var.aws_region
+    lambda_count     = 1
+    cognito_enabled  = true
+    s3_enabled       = true
+    triggers_enabled = true
+    modules_active   = ["storage", "auth"]
+    modules_disabled = ["networking", "database", "security", "ai"]
+  }
+} 

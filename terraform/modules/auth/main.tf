@@ -1,3 +1,60 @@
+# Random string for Cognito domain
+resource "random_string" "cognito_domain_suffix" {
+  length  = 8
+  special = false
+  upper   = false
+}
+
+# IAM Role for Lambda Functions
+resource "aws_iam_role" "lambda_execution_role" {
+  name = "${var.project_name}-${var.environment}-lambda-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = "sts:AssumeRole"
+      Effect = "Allow"
+      Principal = {
+        Service = "lambda.amazonaws.com"
+      }
+    }]
+  })
+
+  tags = {
+    Name = "${var.project_name}-${var.environment}-lambda-role"
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
+  role       = aws_iam_role.lambda_execution_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+# Post Confirmation Lambda for Cognito
+resource "aws_lambda_function" "post_confirmation" {
+  filename      = var.lambda_zip_path
+  function_name = "text2Agent-Post-Confirmation"
+  role          = aws_iam_role.lambda_execution_role.arn
+  handler       = "index.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 60
+
+  environment {
+    variables = {
+      ENVIRONMENT = var.environment
+      PROJECT     = var.project_name
+      FUNCTION    = "post-confirmation"
+    }
+  }
+
+  tags = {
+    Name = "text2Agent-Post-Confirmation"
+  }
+
+  depends_on = [aws_iam_role_policy_attachment.lambda_basic_execution]
+}
+
+# Cognito User Pool
 resource "aws_cognito_user_pool" "main" {
   name                     = "${var.project_name}-${var.environment}-user-pool"
   alias_attributes         = ["email"]
@@ -51,6 +108,7 @@ resource "aws_cognito_user_pool" "main" {
   }
 }
 
+# Cognito User Pool Client
 resource "aws_cognito_user_pool_client" "main" {
   name         = "${var.project_name}-${var.environment}-user-pool-client"
   user_pool_id = aws_cognito_user_pool.main.id
@@ -102,13 +160,17 @@ resource "aws_cognito_user_pool_client" "main" {
   ]
 }
 
-resource "random_string" "cognito_domain_suffix" {
-  length  = 8
-  special = false
-  upper   = false
-}
-
+# Cognito User Pool Domain
 resource "aws_cognito_user_pool_domain" "main" {
   domain       = "${var.project_name}-${var.environment}-${random_string.cognito_domain_suffix.result}"
   user_pool_id = aws_cognito_user_pool.main.id
 }
+
+# Permission for Cognito to invoke Lambda
+resource "aws_lambda_permission" "allow_cognito_invoke" {
+  statement_id  = "AllowExecutionFromCognito"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.post_confirmation.function_name
+  principal     = "cognito-idp.amazonaws.com"
+  source_arn    = aws_cognito_user_pool.main.arn
+} 
