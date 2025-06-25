@@ -1,4 +1,16 @@
 # Random string for unique Cognito domain
+# Data sources for VPC configuration
+data "aws_vpc" "default" {
+  default = true
+}
+
+data "aws_subnets" "default" {
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.default.id]
+  }
+}
+
 resource "random_string" "cognito_domain_suffix" {
   length  = 8
   special = false
@@ -30,6 +42,12 @@ resource "aws_iam_role" "lambda_execution_role" {
 # Basic Lambda execution policy attachment
 resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+  role       = aws_iam_role.lambda_execution_role.name
+}
+
+# IAM policy attachment for Lambda VPC access
+resource "aws_iam_role_policy_attachment" "lambda_vpc_execution" {
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
   role       = aws_iam_role.lambda_execution_role.name
 }
 
@@ -83,8 +101,7 @@ resource "aws_iam_role_policy" "lambda_secrets_policy" {
         Effect = "Allow"
         Action = [
           "secretsmanager:GetSecretValue",
-          "secretsmanager:DescribeSecret",
-          "secretsmanager:ListSecrets"
+          "secretsmanager:DescribeSecret"
         ]
         Resource = [
           # Custom secret we created
@@ -92,6 +109,13 @@ resource "aws_iam_role_policy" "lambda_secrets_policy" {
           # RDS-managed secrets (automatically created by RDS)
           "arn:aws:secretsmanager:${var.aws_region}:*:secret:rds!*"
         ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:ListSecrets"
+        ]
+        Resource = "*"
       }
     ]
   })
@@ -107,6 +131,23 @@ resource "aws_lambda_layer_version" "psycopg2_layer" {
   compatible_runtimes = ["python3.11", "python3.12"]
 }
 
+# Lambda Security Group for VPC access
+resource "aws_security_group" "lambda_sg" {
+  name_prefix = "${var.project_name}-${var.environment}-lambda-"
+  vpc_id      = data.aws_vpc.default.id
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "${var.project_name}-${var.environment}-lambda-sg"
+  }
+}
+
 # Post Confirmation Lambda for Cognito
 resource "aws_lambda_function" "post_confirmation" {
   filename         = var.lambda_zip_path
@@ -120,6 +161,12 @@ resource "aws_lambda_function" "post_confirmation" {
 
   # Add the psycopg2 layer
   layers = [aws_lambda_layer_version.psycopg2_layer.arn]
+
+  # VPC Configuration for RDS access
+  vpc_config {
+    subnet_ids         = data.aws_subnets.default.ids
+    security_group_ids = [aws_security_group.lambda_sg.id]
+  }
 
   environment {
     variables = {
