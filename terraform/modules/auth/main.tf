@@ -54,7 +54,9 @@ resource "aws_iam_role_policy" "lambda_s3_policy" {
           "s3:PutBucketPolicy",
           "s3:GetBucketAcl",
           "s3:PutBucketAcl",
-          "s3:HeadBucket"
+          "s3:HeadBucket",
+          "s3:PutBucketPublicAccessBlock",
+          "s3:PutBucketVersioning"
         ]
         Resource = [
           "arn:aws:s3:::${var.project_name}-*",
@@ -81,7 +83,8 @@ resource "aws_iam_role_policy" "lambda_secrets_policy" {
         Effect = "Allow"
         Action = [
           "secretsmanager:GetSecretValue",
-          "secretsmanager:DescribeSecret"
+          "secretsmanager:DescribeSecret",
+          "secretsmanager:ListSecrets"
         ]
         Resource = [
           # Custom secret we created

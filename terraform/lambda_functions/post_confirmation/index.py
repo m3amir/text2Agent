@@ -347,13 +347,33 @@ def getCredentials():
     secret_name = os.getenv('DB_SECRET_NAME', 'text2agent-dev-db-credentials-v2')
     region_name = os.getenv('DB_REGION', 'eu-west-2')
     
+    print(f"🔍 DEBUG: Attempting to retrieve secret...")
+    print(f"🔑 Secret Name: {secret_name}")
+    print(f"🌍 Region: {region_name}")
+    print(f"📋 Environment Variables:")
+    print(f"   - DB_SECRET_NAME = {os.getenv('DB_SECRET_NAME', 'NOT_SET')}")
+    print(f"   - DB_REGION = {os.getenv('DB_REGION', 'NOT_SET')}")
+    print(f"   - Tenent_db = {os.getenv('Tenent_db', 'NOT_SET')}")
+    
     try:
         client = boto3.client(service_name='secretsmanager', region_name=region_name)
+        
+        # List available secrets for debugging
+        try:
+            response = client.list_secrets(MaxResults=20)
+            print(f"📝 Available secrets in region {region_name}:")
+            for secret in response.get('SecretList', []):
+                print(f"   - {secret['Name']}")
+        except Exception as list_error:
+            print(f"⚠️  Could not list secrets: {list_error}")
+        
+        # Try to get the secret
         get_secret_value_response = client.get_secret_value(SecretId=secret_name)
         secret = json.loads(get_secret_value_response['SecretString'])
         
-        print(f"Successfully retrieved credentials from secret: {secret_name}")
+        print(f"✅ Successfully retrieved credentials from secret: {secret_name}")
         return secret['username'], secret['password']
     except Exception as e:
-        print(f"Error retrieving credentials from secret '{secret_name}': {e}")
+        print(f"❌ Error retrieving credentials from secret '{secret_name}': {e}")
+        print(f"🔧 Check if secret exists and Lambda has proper permissions")
         raise 
