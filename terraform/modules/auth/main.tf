@@ -94,7 +94,7 @@ resource "aws_iam_role_policy" "lambda_secrets_policy" {
 resource "aws_lambda_layer_version" "psycopg2_layer" {
   filename         = "psycopg2-layer.zip"
   layer_name       = "${var.project_name}-${var.environment}-psycopg2-layer"
-  description      = "psycopg2 library for PostgreSQL connectivity - Linux compatible v2.9.9"
+  description      = "psycopg2 library for PostgreSQL connectivity - Python 3.11 Linux compatible v2.9.9"
   source_code_hash = filebase64sha256("psycopg2-layer.zip")
 
   compatible_runtimes = ["python3.11", "python3.12"]
