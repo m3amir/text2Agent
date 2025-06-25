@@ -19,6 +19,7 @@ module "auth" {
   environment     = var.environment
   aws_region      = var.aws_region
   lambda_zip_path = "./post_confirmation.zip"
+  database_host   = module.database.cluster_endpoint
 }
 
 # =====================================================
@@ -37,18 +38,14 @@ module "auth" {
 #   public_subnet_cidrs  = var.public_subnet_cidrs
 # }
 
-# # Database Module - RDS Aurora
-# module "database" {
-#   source = "./modules/database"
-#   
-#   project_name = var.project_name
-#   environment  = var.environment
-#   aws_region   = var.aws_region
-#   
-#   # Depends on networking
-#   # vpc_id         = module.networking.vpc_id
-#   # subnet_ids     = module.networking.private_subnet_ids
-# }
+# Database Module - RDS Aurora
+module "database" {
+  source = "./modules/database"
+
+  project_name = var.project_name
+  environment  = var.environment
+  aws_region   = var.aws_region
+}
 
 # # Security Module - IAM, Secrets Manager
 # module "security" {

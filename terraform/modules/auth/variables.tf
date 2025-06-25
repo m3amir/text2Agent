@@ -17,4 +17,10 @@ variable "lambda_zip_path" {
   description = "Path to the Lambda deployment package"
   type        = string
   default     = "./post_confirmation.zip"
+}
+
+variable "database_host" {
+  description = "Database host endpoint for RDS connection"
+  type        = string
+  default     = ""
 } 

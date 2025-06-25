@@ -81,6 +81,27 @@ resource "aws_iam_role_policy" "lambda_s3_policy" {
   })
 }
 
+# Additional IAM policy for Secrets Manager access (for database credentials)
+resource "aws_iam_role_policy" "lambda_secrets_policy" {
+  name = "${var.project_name}-${var.environment}-lambda-secrets-policy"
+  role = aws_iam_role.lambda_execution_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue"
+        ]
+        Resource = [
+          "arn:aws:secretsmanager:${var.aws_region}:*:secret:rds!db-*"
+        ]
+      }
+    ]
+  })
+}
+
 # Post Confirmation Lambda for Cognito
 resource "aws_lambda_function" "post_confirmation" {
   filename      = var.lambda_zip_path
@@ -95,6 +116,7 @@ resource "aws_lambda_function" "post_confirmation" {
       ENVIRONMENT = var.environment
       PROJECT     = var.project_name
       FUNCTION    = "post-confirmation"
+      Tenent_db   = var.database_host
     }
   }
 

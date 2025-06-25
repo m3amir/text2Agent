@@ -1,14 +1,16 @@
 import json
 import boto3
+import psycopg2
 import uuid
 import os
 import time
+import re
 from datetime import datetime
 
 def lambda_handler(event, context):
     """
     Cognito Post Confirmation Lambda Trigger
-    Creates tenant buckets and user folder structure after user confirmation
+    Creates tenant buckets, user folder structure, and manages tenant/user data in PostgreSQL
     """
     try:
         # Log the entire event for debugging
@@ -35,28 +37,33 @@ def lambda_handler(event, context):
         domain = email.split('@')[1] if '@' in email else 'unknown'
         print(f"User domain: {domain}")
 
-        # Check if tenant bucket exists, if not create it
-        tenant_id = get_or_create_tenant(domain)
+        # Check if tenant already exists in database
+        existing_tenant_id = tenant_exists(domain)
         
-        # Create a safe bucket name (S3 bucket names must be globally unique and follow strict rules)
-        import re
-        safe_domain = re.sub(r'[^a-z0-9-]', '-', domain.lower())
-        safe_domain = re.sub(r'-+', '-', safe_domain).strip('-')
-        
-        # Shorten if too long (S3 bucket names max 63 chars)
-        tenant_bucket = f"text2agent-{tenant_id}-{safe_domain}"
-        if len(tenant_bucket) > 63:
-            tenant_bucket = f"text2agent-{tenant_id}"[:63]
-        
-        # Ensure bucket name ends with alphanumeric (not hyphen)
-        tenant_bucket = tenant_bucket.rstrip('-')
-        
-        # Validate bucket name
-        if len(tenant_bucket) < 3:
-            tenant_bucket = f"text2agent-{tenant_id}"
-        
-        print(f"Using tenant bucket: {tenant_bucket} (length: {len(tenant_bucket)})")
-        print(f"Bucket name validation: starts_with_letter={tenant_bucket[0].isalpha()}, ends_with_alnum={tenant_bucket[-1].isalnum()}")
+        if existing_tenant_id:
+            print(f"Tenant already exists with ID: {existing_tenant_id}")
+            tenant_bucket = generate_bucket_name(existing_tenant_id, domain)
+            
+            # Only add mapping if user doesn't already exist
+            if not tenant_mapping_exists(email):
+                save_tenant_to_db(domain, email, existing_tenant_id)
+                insert_user_to_db(email, existing_tenant_id)
+            else:
+                print(f"User {email} already exists in tenant {existing_tenant_id}")
+        else:
+            # Create new tenant
+            generated_uuid = str(uuid.uuid4())
+            tenant_bucket = generate_bucket_name(generated_uuid, domain)
+            print(f"Creating new tenant with ID: {generated_uuid}")
+            
+            # Create bucket first
+            if create_tenant_bucket(tenant_bucket):
+                # Only save to DB if bucket creation succeeded
+                save_tenant_to_db(domain, email, generated_uuid)
+                insert_user_to_db(email, generated_uuid)
+            else:
+                print(f"ERROR: Failed to create bucket {tenant_bucket}, skipping DB operations")
+                return event
         
         # Create user folders in the tenant bucket
         create_user_folders(tenant_bucket, email)
@@ -72,42 +79,87 @@ def lambda_handler(event, context):
         # Don't raise the exception - we don't want to block user registration
         return event
 
-def get_or_create_tenant(domain):
+def generate_bucket_name(tenant_id, domain):
     """
-    Get existing tenant ID for domain or create a new one
-    Since we don't have database, we'll use a simple mapping approach
+    Generate a valid S3 bucket name
+    """
+    # Create a safe bucket name (S3 bucket names must be globally unique and follow strict rules)
+    safe_domain = re.sub(r'[^a-z0-9-]', '-', domain.lower())
+    safe_domain = re.sub(r'-+', '-', safe_domain).strip('-')
+    
+    # Shorten if too long (S3 bucket names max 63 chars)
+    tenant_bucket = f"tenant-{tenant_id}-{safe_domain}"
+    if len(tenant_bucket) > 63:
+        tenant_bucket = f"tenant-{tenant_id}"[:63]
+    
+    # Ensure bucket name ends with alphanumeric (not hyphen)
+    tenant_bucket = tenant_bucket.rstrip('-')
+    
+    # Validate bucket name
+    if len(tenant_bucket) < 3:
+        tenant_bucket = f"tenant-{tenant_id}"
+    
+    return tenant_bucket
+
+def tenant_exists(domain):
+    """
+    Check if a tenant already exists for the given domain
     """
     try:
-        # For now, create a deterministic UUID based on domain
-        # In production, this would check the database first
-        import hashlib
-        import re
-        
-        # Clean domain name for bucket naming (remove dots, make lowercase)
-        clean_domain = re.sub(r'[^a-z0-9-]', '-', domain.lower())
-        clean_domain = re.sub(r'-+', '-', clean_domain)  # Remove multiple hyphens
-        clean_domain = clean_domain.strip('-')  # Remove leading/trailing hyphens
-        
-        # Create a deterministic hash based on domain (shorter)
-        domain_hash = hashlib.md5(domain.encode()).hexdigest()[:6]
-        
-        # Create shorter, more reliable tenant ID
-        tenant_id = f"{domain_hash}-{str(uuid.uuid4())[:6]}"
-        
-        print(f"Generated tenant ID {tenant_id} for domain {domain} (cleaned: {clean_domain})")
-        return tenant_id
-        
+        username, password = getCredentials()
+        connection = psycopg2.connect(
+            user=username, 
+            password=password, 
+            host=os.getenv('Tenent_db', ''), 
+            database='postgres'
+        )
+        cursor = connection.cursor()
+
+        query = "SELECT tenant FROM \"Tenants\".tenantmappings WHERE domain = %s LIMIT 1;"
+        cursor.execute(query, (domain,))
+        result = cursor.fetchone()
+
+        cursor.close()
+        connection.close()
+        return result[0] if result else None
     except Exception as e:
-        print(f"ERROR generating tenant ID: {e}")
-        # Fallback to simple UUID
-        return str(uuid.uuid4())[:8]
+        print(f"Error checking tenant existence: {e}")
+        return None
+
+def tenant_mapping_exists(email):
+    """
+    Check if a user already has a tenant mapping
+    """
+    try:
+        username, password = getCredentials()
+        connection = psycopg2.connect(
+            user=username, 
+            password=password, 
+            host=os.getenv('Tenent_db', ''), 
+            database='postgres'
+        )
+        cursor = connection.cursor()
+
+        query = "SELECT 1 FROM \"Tenants\".tenantmappings WHERE email = %s;"
+        cursor.execute(query, (email,))
+        result = cursor.fetchone()
+
+        cursor.close()
+        connection.close()
+        return True if result else False
+    except Exception as e:
+        print(f"Error checking tenant mapping for email {email}: {e}")
+        return False
 
 def create_tenant_bucket(bucket_name):
     """
-    Create S3 bucket for tenant
+    Create S3 bucket for tenant with enhanced error handling
     """
     s3 = boto3.client('s3')
     try:
+        print(f"Using tenant bucket: {bucket_name} (length: {len(bucket_name)})")
+        print(f"Bucket name validation: starts_with_letter={bucket_name[0].isalpha()}, ends_with_alnum={bucket_name[-1].isalnum()}")
+        
         # Check if bucket already exists
         try:
             s3.head_bucket(Bucket=bucket_name)
@@ -150,7 +202,7 @@ def create_tenant_bucket(bucket_name):
                 print(f"Bucket name '{bucket_name}' is invalid. Length: {len(bucket_name)}")
                 print("S3 bucket naming rules: 3-63 chars, lowercase, no spaces, no dots at start/end")
             
-            raise create_error
+            return False
         
         # Add bucket policy for security
         add_bucket_security_policy(bucket_name)
@@ -158,7 +210,7 @@ def create_tenant_bucket(bucket_name):
         return True
         
     except Exception as e:
-        print(f"ERROR creating bucket '{bucket_name}': {e}")
+        print(f"ERROR in create_tenant_bucket: {e}")
         return False
 
 def add_bucket_security_policy(bucket_name):
@@ -189,82 +241,114 @@ def add_bucket_security_policy(bucket_name):
     except Exception as e:
         print(f"ERROR applying security policies to bucket '{bucket_name}': {e}")
 
+def save_tenant_to_db(domain, email, tenant_id):
+    """
+    Save tenant mapping to database
+    """
+    try:
+        username, password = getCredentials()
+        connection = psycopg2.connect(
+            user=username, 
+            password=password, 
+            host=os.getenv('Tenent_db', ''), 
+            database='postgres'
+        )
+        cursor = connection.cursor()
+
+        insert_query = """
+            INSERT INTO "Tenants".tenantmappings (domain, email, tenant)
+            VALUES (%s, %s, %s);
+        """
+        cursor.execute(insert_query, (domain, email, tenant_id))
+        connection.commit()
+
+        print(f"Record for email '{email}' inserted successfully with tenant ID '{tenant_id}'.")
+        cursor.close()
+        connection.close()
+    except Exception as e:
+        print(f"Error inserting record for email '{email}': {e}")
+
+def insert_user_to_db(email, tenant_id):
+    """
+    Insert user record to database
+    """
+    try:
+        username, password = getCredentials()
+        connection = psycopg2.connect(
+            user=username, 
+            password=password, 
+            host=os.getenv('Tenent_db', ''), 
+            database='postgres'
+        )
+        cursor = connection.cursor()
+
+        email_prefix = email.split('@')[0]
+        uid = f"{email_prefix}_{tenant_id}"
+
+        insert_query = """
+            INSERT INTO "Tenants".users (uid, email)
+            VALUES (%s, %s)
+            ON CONFLICT (uid) DO NOTHING;
+        """
+        cursor.execute(insert_query, (uid, email))
+        connection.commit()
+
+        print(f"User record inserted: UID='{uid}', Email='{email}'")
+        cursor.close()
+        connection.close()
+    except Exception as e:
+        print(f"Error inserting user '{email}': {e}")
+
 def create_user_folders(bucket_name, email):
     """
-    Create user folder structure in S3 bucket
+    Create user folder structure in S3 bucket (original structure)
     """
     s3 = boto3.client('s3')
-    
-    # First ensure the bucket exists
-    if not create_tenant_bucket(bucket_name):
-        print(f"ERROR: Failed to create/access bucket {bucket_name}")
-        return False
-    
-    user_folder = f"users/{email}/"
-    folders = [
-        f"{user_folder}data/",
-        f"{user_folder}logs/",
-        f"{user_folder}uploads/",
-        f"{user_folder}processed/"
-    ]
+    user_folder = f"cognito/{email}/"
+    data_folder = f"{user_folder}Data/"
+    logs_folder = f"{user_folder}Logs/"
 
-    # Wait a moment for bucket to be fully ready
+    # Wait for bucket to be ready
     retries = 3
     for attempt in range(retries):
         try:
             s3.head_bucket(Bucket=bucket_name)
-            print(f"Bucket '{bucket_name}' is accessible. Creating user folders.")
+            print(f"Bucket '{bucket_name}' exists. Proceeding to create user folders.")
             break
         except Exception as e:
             if attempt < retries - 1:
-                print(f"Attempt {attempt + 1}: Bucket '{bucket_name}' not ready yet. Retrying...")
+                print(f"Attempt {attempt + 1}: Bucket '{bucket_name}' not accessible yet. Retrying...")
                 time.sleep(2)
             else:
-                print(f"ERROR: Bucket '{bucket_name}' not accessible after retries. Error: {e}")
+                print(f"ERROR: Bucket '{bucket_name}' does not exist. Error: {e}")
                 return False
 
     # Create folder structure
     try:
-        for folder in folders:
-            s3.put_object(
-                Bucket=bucket_name, 
-                Key=folder,
-                Body='',
-                Metadata={
-                    'created-by': 'post-confirmation-lambda',
-                    'user-email': email,
-                    'created-at': datetime.utcnow().isoformat()
-                }
-            )
-            print(f"Created folder: {folder}")
-            
-        # Create a welcome file
-        welcome_content = f"""Welcome to your tenant space!
-
-User: {email}
-Created: {datetime.utcnow().isoformat()}
-Bucket: {bucket_name}
-
-Your folder structure:
-- data/: Store your data files here
-- logs/: Application logs will be stored here  
-- uploads/: Temporary upload area
-- processed/: Processed files will be moved here
-"""
+        s3.put_object(Bucket=bucket_name, Key=user_folder)
+        print(f"User folder '{user_folder}' created successfully in bucket '{bucket_name}'.")
         
-        s3.put_object(
-            Bucket=bucket_name,
-            Key=f"{user_folder}README.txt",
-            Body=welcome_content,
-            Metadata={
-                'created-by': 'post-confirmation-lambda',
-                'user-email': email
-            }
-        )
+        s3.put_object(Bucket=bucket_name, Key=data_folder)
+        print(f"Sub-folder 'Data' created successfully in '{user_folder}'.")
         
-        print(f"User folder structure created successfully for {email} in bucket {bucket_name}")
+        s3.put_object(Bucket=bucket_name, Key=logs_folder)
+        print(f"Sub-folder 'Logs' created successfully in '{user_folder}'.")
+        
         return True
         
     except Exception as e:
-        print(f"ERROR creating user folders: {e}")
-        return False 
+        print(f"Error creating user folders: {e}")
+        return False
+
+def getCredentials():
+    """
+    Get database credentials from AWS Secrets Manager
+    """
+    secret_name = "rds!db-0534ea7e-2933-421d-96a0-c6d80af7fdc4"
+    region_name = "eu-west-2"
+    
+    client = boto3.client(service_name='secretsmanager', region_name=region_name)
+    get_secret_value_response = client.get_secret_value(SecretId=secret_name)
+    secret = json.loads(get_secret_value_response['SecretString'])
+    
+    return secret['username'], secret['password'] 

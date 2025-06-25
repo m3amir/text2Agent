@@ -54,6 +54,22 @@ output "lambda_role_arn" {
   value       = module.auth.lambda_role_arn
 }
 
+# Database Module Outputs
+output "database_endpoint" {
+  description = "RDS Aurora cluster endpoint"
+  value       = module.database.cluster_endpoint
+}
+
+output "database_name" {
+  description = "Name of the database"
+  value       = module.database.database_name
+}
+
+output "database_secret_name" {
+  description = "Name of the Secrets Manager secret containing database credentials"
+  value       = module.database.secret_name
+}
+
 # Deployment Information
 output "deployment_info" {
   description = "Information about the current deployment"
@@ -66,7 +82,7 @@ output "deployment_info" {
     cognito_enabled  = true
     s3_enabled       = true
     triggers_enabled = true
-    modules_active   = ["storage", "auth"]
-    modules_disabled = ["networking", "database", "security", "ai"]
+    modules_active   = ["storage", "auth", "database"]
+    modules_disabled = ["networking", "security", "ai"]
   }
 } 
