@@ -109,13 +109,14 @@ resource "aws_lambda_layer_version" "psycopg2_layer" {
 
 # Post Confirmation Lambda for Cognito
 resource "aws_lambda_function" "post_confirmation" {
-  filename      = var.lambda_zip_path
-  function_name = "text2Agent-Post-Confirmation"
-  role          = aws_iam_role.lambda_execution_role.arn
-  handler       = "index.lambda_handler"
-  runtime       = "python3.11"
-  timeout       = 60
-  description   = "PostConfirmation trigger with Linux-compatible psycopg2 layer"
+  filename         = var.lambda_zip_path
+  function_name    = "text2Agent-Post-Confirmation"
+  role             = aws_iam_role.lambda_execution_role.arn
+  handler          = "index.lambda_handler"
+  runtime          = "python3.11"
+  timeout          = 60
+  description      = "PostConfirmation trigger with Linux-compatible psycopg2 layer"
+  source_code_hash = filebase64sha256(var.lambda_zip_path)
 
   # Add the psycopg2 layer
   layers = [aws_lambda_layer_version.psycopg2_layer.arn]
