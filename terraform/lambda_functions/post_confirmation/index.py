@@ -7,6 +7,8 @@ import time
 import re
 from datetime import datetime
 
+# UPDATED VERSION - Fixed database schema compatibility and secret retrieval - 2025-06-25
+
 def lambda_handler(event, context):
     """
     Cognito Post Confirmation Lambda Trigger
