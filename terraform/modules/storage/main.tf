@@ -79,4 +79,4 @@ resource "aws_s3_bucket_lifecycle_configuration" "str_data_store" {
       noncurrent_days = 365
     }
   }
-} 
+}
