@@ -95,7 +95,7 @@ resource "aws_iam_role_policy" "lambda_secrets_policy" {
           "secretsmanager:GetSecretValue"
         ]
         Resource = [
-          "arn:aws:secretsmanager:${var.aws_region}:*:secret:rds!db-*"
+          "arn:aws:secretsmanager:${var.aws_region}:*:secret:${var.project_name}-${var.environment}-db-credentials-*"
         ]
       }
     ]
