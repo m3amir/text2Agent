@@ -113,12 +113,12 @@ resource "aws_lambda_function" "post_confirmation" {
 
   environment {
     variables = {
-      ENVIRONMENT     = var.environment
-      PROJECT         = var.project_name
-      FUNCTION        = "post-confirmation"
-      Tenent_db       = var.database_host
-      DB_SECRET_NAME  = "${var.project_name}-${var.environment}-db-credentials-v2"
-      AWS_REGION      = var.aws_region
+      ENVIRONMENT    = var.environment
+      PROJECT        = var.project_name
+      FUNCTION       = "post-confirmation"
+      Tenent_db      = var.database_host
+      DB_SECRET_NAME = "${var.project_name}-${var.environment}-db-credentials-v2"
+      AWS_REGION     = var.aws_region
     }
   }
 
