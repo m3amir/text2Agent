@@ -27,8 +27,8 @@ env:
   AWS_DEFAULT_REGION: eu-west-2
 
 jobs:
-  terraform-check:
-    name: 'Terraform Format and Validate'
+  build-lambda:
+    name: 'Build Lambda Functions'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -37,6 +37,59 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build psycopg2 Layer
+        run: |
+          echo "🔨 Building psycopg2 Lambda Layer with Docker for Linux compatibility..."
+          chmod +x ./build_psycopg2_layer.sh
+          ./build_psycopg2_layer.sh
+
+      - name: Build Lambda Function Package
+        run: |
+          echo "📦 Building Lambda function package (code only)..."
+          chmod +x ./build_lambda.sh
+          ./build_lambda.sh
+
+      - name: Verify Build Artifacts
+        run: |
+          echo "✅ Verifying Lambda build artifacts..."
+          ls -la *.zip
+          echo ""
+          echo "📋 psycopg2 layer contents:"
+          unzip -l psycopg2-layer.zip | head -10
+          echo ""
+          echo "📋 Lambda function contents:"
+          unzip -l post_confirmation.zip
+
+      - name: Upload Lambda Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: lambda-packages
+          path: |
+            terraform/psycopg2-layer.zip
+            terraform/post_confirmation.zip
+          retention-days: 7
+
+  terraform-check:
+    name: 'Terraform Format and Validate'
+    needs: build-lambda
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./terraform
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Download Lambda Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: lambda-packages
+          path: terraform/
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -77,6 +130,12 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+
+      - name: Download Lambda Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: lambda-packages
+          path: terraform/
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -144,6 +203,12 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      - name: Download Lambda Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: lambda-packages
+          path: terraform/
+
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -208,8 +273,6 @@ jobs:
           name: infrastructure-outputs
           path: terraform/infrastructure-outputs.json
           retention-days: 30
-
-
 
   terraform-destroy:
     name: 'Terraform Destroy'
