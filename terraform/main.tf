@@ -5,7 +5,7 @@
 # Storage Module - ACTIVE (S3 buckets)
 module "storage" {
   source = "./modules/storage"
-  
+
   project_name = var.project_name
   environment  = var.environment
   aws_region   = var.aws_region
@@ -14,7 +14,7 @@ module "storage" {
 # Authentication Module - ACTIVE (Cognito + Lambda)
 module "auth" {
   source = "./modules/auth"
-  
+
   project_name    = var.project_name
   environment     = var.environment
   aws_region      = var.aws_region
