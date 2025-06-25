@@ -156,3 +156,115 @@ resource "aws_secretsmanager_secret_version" "db_credentials" {
     dbname   = aws_rds_cluster.main.database_name
   })
 }
+
+# Database Schema Initialization using RDS Data API (GitHub Actions compatible)
+resource "null_resource" "db_schema_init" {
+  # This resource will re-run if the cluster endpoint changes
+  triggers = {
+    cluster_arn = aws_rds_cluster.main.arn
+    secret_arn  = aws_secretsmanager_secret.db_credentials.arn
+  }
+
+  # Wait for the database to be ready
+  provisioner "local-exec" {
+    command = "sleep 120"
+  }
+
+  # Initialize database schema using AWS CLI and RDS Data API
+  provisioner "local-exec" {
+    command = <<-EOF
+      # Create Tenants schema
+      aws rds-data execute-statement \
+        --resource-arn "${aws_rds_cluster.main.arn}" \
+        --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
+        --database "${aws_rds_cluster.main.database_name}" \
+        --sql 'CREATE SCHEMA IF NOT EXISTS "Tenants";' \
+        --region ${var.aws_region}
+
+      # Create tenantmappings table
+      aws rds-data execute-statement \
+        --resource-arn "${aws_rds_cluster.main.arn}" \
+        --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
+        --database "${aws_rds_cluster.main.database_name}" \
+        --sql 'CREATE TABLE IF NOT EXISTS "Tenants"."tenantmappings" (
+          id SERIAL PRIMARY KEY,
+          tenant_id UUID NOT NULL UNIQUE,
+          domain VARCHAR(255) NOT NULL,
+          bucket_name VARCHAR(255) NOT NULL,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          CONSTRAINT unique_domain UNIQUE (domain),
+          CONSTRAINT unique_bucket UNIQUE (bucket_name)
+        );' \
+        --region ${var.aws_region}
+
+      # Create users table
+      aws rds-data execute-statement \
+        --resource-arn "${aws_rds_cluster.main.arn}" \
+        --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
+        --database "${aws_rds_cluster.main.database_name}" \
+        --sql 'CREATE TABLE IF NOT EXISTS "Tenants"."users" (
+          id SERIAL PRIMARY KEY,
+          user_id UUID NOT NULL UNIQUE,
+          email VARCHAR(255) NOT NULL UNIQUE,
+          name VARCHAR(255) NOT NULL,
+          tenant_id UUID NOT NULL,
+          cognito_sub VARCHAR(255) UNIQUE,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          CONSTRAINT fk_tenant FOREIGN KEY (tenant_id) REFERENCES "Tenants"."tenantmappings" (tenant_id) ON DELETE CASCADE
+        );' \
+        --region ${var.aws_region}
+
+      # Create indexes
+      aws rds-data execute-statement \
+        --resource-arn "${aws_rds_cluster.main.arn}" \
+        --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
+        --database "${aws_rds_cluster.main.database_name}" \
+        --sql 'CREATE INDEX IF NOT EXISTS idx_tenantmappings_domain ON "Tenants"."tenantmappings" (domain);' \
+        --region ${var.aws_region}
+
+      aws rds-data execute-statement \
+        --resource-arn "${aws_rds_cluster.main.arn}" \
+        --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
+        --database "${aws_rds_cluster.main.database_name}" \
+        --sql 'CREATE INDEX IF NOT EXISTS idx_users_email ON "Tenants"."users" (email);' \
+        --region ${var.aws_region}
+
+      aws rds-data execute-statement \
+        --resource-arn "${aws_rds_cluster.main.arn}" \
+        --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
+        --database "${aws_rds_cluster.main.database_name}" \
+        --sql 'CREATE INDEX IF NOT EXISTS idx_users_tenant_id ON "Tenants"."users" (tenant_id);' \
+        --region ${var.aws_region}
+
+      # Create update trigger function
+      aws rds-data execute-statement \
+        --resource-arn "${aws_rds_cluster.main.arn}" \
+        --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
+        --database "${aws_rds_cluster.main.database_name}" \
+        --sql 'CREATE OR REPLACE FUNCTION update_updated_at_column() RETURNS TRIGGER AS $$ BEGIN NEW.updated_at = CURRENT_TIMESTAMP; RETURN NEW; END; $$ language '"'"'plpgsql'"'"';' \
+        --region ${var.aws_region}
+
+      # Create triggers
+      aws rds-data execute-statement \
+        --resource-arn "${aws_rds_cluster.main.arn}" \
+        --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
+        --database "${aws_rds_cluster.main.database_name}" \
+        --sql 'DROP TRIGGER IF EXISTS update_tenantmappings_updated_at ON "Tenants"."tenantmappings"; CREATE TRIGGER update_tenantmappings_updated_at BEFORE UPDATE ON "Tenants"."tenantmappings" FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();' \
+        --region ${var.aws_region}
+
+      aws rds-data execute-statement \
+        --resource-arn "${aws_rds_cluster.main.arn}" \
+        --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
+        --database "${aws_rds_cluster.main.database_name}" \
+        --sql 'DROP TRIGGER IF EXISTS update_users_updated_at ON "Tenants"."users"; CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON "Tenants"."users" FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();' \
+        --region ${var.aws_region}
+    EOF
+  }
+
+  depends_on = [
+    aws_rds_cluster_instance.main,
+    aws_secretsmanager_secret_version.db_credentials
+  ]
+}
