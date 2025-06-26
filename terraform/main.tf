@@ -169,8 +169,8 @@ module "auth" {
   rds_security_group_id = module.database.rds_security_group_id
 
   # Lambda Configuration
-  lambda_zip_path           = "./post_confirmation.zip"
-  psycopg2_layer_zip_path   = "./psycopg2-layer.zip"
+  lambda_zip_path         = "./post_confirmation.zip"
+  psycopg2_layer_zip_path = "./psycopg2-layer.zip"
 }
 
  
