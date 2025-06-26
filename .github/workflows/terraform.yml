@@ -293,59 +293,32 @@ jobs:
             echo "PRE_APPLY_BACKUP_KEY=" >> $GITHUB_ENV
           fi
 
-      - name: Fix Bedrock State Inconsistencies
-        run: |
-          echo "🔍 Checking for Bedrock state inconsistencies..."
-          
-          # Check if Knowledge Base was recreated but data source still in old state
-          echo "Checking Bedrock resources in state..."
-          KB_IN_STATE=$(terraform state list | grep "aws_bedrockagent_knowledge_base" || echo "")
-          DS_IN_STATE=$(terraform state list | grep "aws_bedrockagent_data_source" || echo "")
-          
-          if [ -n "$KB_IN_STATE" ] && [ -n "$DS_IN_STATE" ]; then
-            echo "Found both Knowledge Base and Data Source in state"
-            
-            # Get KB ID from state
-            KB_ID=$(terraform state show module.ai.aws_bedrockagent_knowledge_base.main 2>/dev/null | grep "^[[:space:]]*id[[:space:]]*=" | cut -d'"' -f2 || echo "")
-            DS_ID=$(terraform state show module.ai.aws_bedrockagent_data_source.s3_documents 2>/dev/null | grep "^[[:space:]]*id[[:space:]]*=" | cut -d'"' -f2 | cut -d',' -f1 || echo "")
-            
-            echo "Knowledge Base ID in state: $KB_ID"
-            echo "Data Source ID in state: $DS_ID"
-            
-            if [ -n "$KB_ID" ] && [ -n "$DS_ID" ]; then
-              # Check if the data source actually exists in AWS for this KB
-              echo "Verifying data source exists in AWS..."
-              DS_EXISTS=$(aws bedrock-agent get-data-source \
-                --knowledge-base-id "$KB_ID" \
-                --data-source-id "$DS_ID" \
-                --region ${{ env.AWS_REGION }} \
-                --query 'dataSource.dataSourceId' \
-                --output text 2>/dev/null || echo "NOT_FOUND")
-              
-              if [ "$DS_EXISTS" = "NOT_FOUND" ]; then
-                echo "🔧 Data source $DS_ID not found in Knowledge Base $KB_ID"
-                echo "Removing orphaned data source from Terraform state..."
-                terraform state rm module.ai.aws_bedrockagent_data_source.s3_documents || echo "⚠️ Could not remove from state"
-                echo "✅ Orphaned data source removed - will be recreated during apply"
-              else
-                echo "✅ Data source exists and is correctly linked"
-              fi
-            fi
-          else
-            echo "ℹ️ No Bedrock state inconsistency detected"
-          fi
-
-      - name: Terraform Apply
+      - name: Terraform Apply with Bedrock Error Handling
         run: |
           echo "🚀 Applying complete infrastructure deployment..."
           
           # First attempt: Normal apply
-          if ! terraform apply -auto-approve tfplan; then
-            echo "⚠️ Initial apply failed - checking for Bedrock data source issues..."
+          APPLY_OUTPUT_FILE="/tmp/terraform_apply_output.log"
+          
+          if terraform apply -auto-approve tfplan 2>&1 | tee "$APPLY_OUTPUT_FILE"; then
+            echo "✅ Complete infrastructure deployment successful"
+          else
+            echo "⚠️ Initial apply failed - analyzing error..."
             
-            # Check if it's the specific Bedrock data source error
-            LAST_ERROR=$(terraform apply -auto-approve tfplan 2>&1 | tail -10 || echo "")
-            if echo "$LAST_ERROR" | grep -q "ResourceNotFoundException.*DataSource.*is not found"; then
+            # Check for different types of errors
+            if grep -q "Saved plan is stale" "$APPLY_OUTPUT_FILE"; then
+              echo "🔧 Plan is stale - regenerating plan and reapplying..."
+              
+              # Regenerate plan and apply
+              terraform plan -out=tfplan-fresh \
+                -var="aws_region=${{ env.AWS_REGION }}" \
+                -var="aws_profile="
+              
+              echo "Applying fresh plan..."
+              terraform apply -auto-approve tfplan-fresh
+              echo "✅ Infrastructure deployed with fresh plan"
+              
+            elif grep -q "ResourceNotFoundException.*DataSource.*is not found" "$APPLY_OUTPUT_FILE"; then
               echo "🔧 Detected orphaned Bedrock data source - applying fix..."
               
               # Remove the problematic data source from state
@@ -359,14 +332,14 @@ jobs:
               
               echo "Applying fixed plan..."
               terraform apply -auto-approve tfplan-fixed
-              
               echo "✅ Infrastructure deployed with Bedrock data source recreated"
+              
             else
-              echo "❌ Different error encountered - failing deployment"
+              echo "❌ Unhandled error encountered:"
+              cat "$APPLY_OUTPUT_FILE"
+              echo "Failing deployment"
               exit 1
             fi
-          else
-            echo "✅ Complete infrastructure deployment successful"
           fi
 
       - name: Post-Apply State Backup
