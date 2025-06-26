@@ -211,7 +211,7 @@ resource "null_resource" "db_schema_init" {
         --resource-arn "${aws_rds_cluster.main.arn}" \
         --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
         --database "${aws_rds_cluster.main.database_name}" \
-        --sql 'CREATE INDEX IF NOT EXISTS idx_bedrock_kb_embedding ON bedrock_integration.bedrock_kb USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);' \
+        --sql 'CREATE INDEX IF NOT EXISTS idx_bedrock_kb_embedding ON bedrock_integration.bedrock_kb USING hnsw (embedding vector_cosine_ops);' \
         --region ${var.aws_region}
 
       aws rds-data execute-statement \
