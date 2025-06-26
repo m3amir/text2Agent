@@ -190,11 +190,21 @@ resource "null_resource" "db_schema_init" {
       # STEP 2: Initialize str_kb database (Bedrock Knowledge Base)
       # =================================================================
       echo "Setting up str_kb database for Bedrock..."
+      # Enable pgvector extension (version 0.5.0+ required for HNSW)
       aws rds-data execute-statement \
         --resource-arn "${aws_rds_cluster.main.arn}" \
         --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
         --database "${aws_rds_cluster.main.database_name}" \
         --sql 'CREATE EXTENSION IF NOT EXISTS vector;' \
+        --region ${var.aws_region}
+
+      # Verify pgvector version (must be 0.5.0+ for HNSW support)
+      echo "Checking pgvector version..."
+      aws rds-data execute-statement \
+        --resource-arn "${aws_rds_cluster.main.arn}" \
+        --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
+        --database "${aws_rds_cluster.main.database_name}" \
+        --sql "SELECT extversion FROM pg_extension WHERE extname='vector';" \
         --region ${var.aws_region}
 
       aws rds-data execute-statement \
@@ -204,24 +214,51 @@ resource "null_resource" "db_schema_init" {
         --sql 'CREATE SCHEMA IF NOT EXISTS bedrock_integration;' \
         --region ${var.aws_region}
 
+      # Create Bedrock user with proper permissions (as per AWS docs)
+      aws rds-data execute-statement \
+        --resource-arn "${aws_rds_cluster.main.arn}" \
+        --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
+        --database "${aws_rds_cluster.main.database_name}" \
+        --sql "CREATE ROLE bedrock_user LOGIN;" \
+        --region ${var.aws_region} || echo "bedrock_user role might already exist"
+
+      # Grant permissions to bedrock_user
+      aws rds-data execute-statement \
+        --resource-arn "${aws_rds_cluster.main.arn}" \
+        --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
+        --database "${aws_rds_cluster.main.database_name}" \
+        --sql 'GRANT ALL ON SCHEMA bedrock_integration to bedrock_user;' \
+        --region ${var.aws_region}
+
+      # Create table following AWS exact specification
       aws rds-data execute-statement \
         --resource-arn "${aws_rds_cluster.main.arn}" \
         --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
         --database "${aws_rds_cluster.main.database_name}" \
         --sql 'CREATE TABLE IF NOT EXISTS bedrock_integration.bedrock_kb (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          chunks TEXT NOT NULL,
+          id UUID PRIMARY KEY,
           embedding vector(1024),
-          metadata JSONB
+          chunks TEXT,
+          metadata JSON,
+          custom_metadata JSONB
         );' \
         --region ${var.aws_region}
 
-      # Create the HNSW index for vector similarity search (required by Bedrock)
+      # Grant table permissions to bedrock_user
       aws rds-data execute-statement \
         --resource-arn "${aws_rds_cluster.main.arn}" \
         --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
         --database "${aws_rds_cluster.main.database_name}" \
-        --sql 'CREATE INDEX IF NOT EXISTS idx_bedrock_kb_embedding ON bedrock_integration.bedrock_kb USING hnsw (embedding vector_cosine_ops);' \
+        --sql 'GRANT ALL ON TABLE bedrock_integration.bedrock_kb to bedrock_user;' \
+        --region ${var.aws_region}
+
+      # Create the HNSW index for vector similarity search (AWS requirement)
+      # Using ef_construction=256 as recommended by AWS for pgvector 0.6.0+
+      aws rds-data execute-statement \
+        --resource-arn "${aws_rds_cluster.main.arn}" \
+        --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
+        --database "${aws_rds_cluster.main.database_name}" \
+        --sql 'CREATE INDEX IF NOT EXISTS idx_bedrock_kb_embedding ON bedrock_integration.bedrock_kb USING hnsw (embedding vector_cosine_ops) WITH (ef_construction=256);' \
         --region ${var.aws_region}
 
       # Verify the index was created successfully
@@ -233,19 +270,23 @@ resource "null_resource" "db_schema_init" {
         --sql "SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'bedrock_kb' AND schemaname = 'bedrock_integration' AND indexdef LIKE '%hnsw%';" \
         --region ${var.aws_region}
 
+      # Create text search index (AWS requirement)
       aws rds-data execute-statement \
         --resource-arn "${aws_rds_cluster.main.arn}" \
         --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
         --database "${aws_rds_cluster.main.database_name}" \
-        --sql 'CREATE INDEX IF NOT EXISTS idx_bedrock_kb_metadata ON bedrock_integration.bedrock_kb USING gin (metadata);' \
+        --sql 'CREATE INDEX IF NOT EXISTS idx_bedrock_kb_text ON bedrock_integration.bedrock_kb USING gin (to_tsvector('\''simple'\'', chunks));' \
         --region ${var.aws_region}
 
+      # Create custom metadata index (AWS requirement for filtering)
       aws rds-data execute-statement \
         --resource-arn "${aws_rds_cluster.main.arn}" \
         --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
         --database "${aws_rds_cluster.main.database_name}" \
-        --sql 'CREATE INDEX IF NOT EXISTS idx_bedrock_kb_chunks_gin ON bedrock_integration.bedrock_kb USING gin (to_tsvector('\''simple'\'', chunks));' \
+        --sql 'CREATE INDEX IF NOT EXISTS idx_bedrock_kb_custom_metadata ON bedrock_integration.bedrock_kb USING gin (custom_metadata);' \
         --region ${var.aws_region}
+
+
 
       # =================================================================
       # STEP 3: Initialize text2AgentTenants database (Tenant Management)
