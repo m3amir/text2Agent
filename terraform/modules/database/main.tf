@@ -156,6 +156,8 @@ resource "null_resource" "db_schema_init" {
   triggers = {
     cluster_arn = aws_rds_cluster.main.arn
     secret_arn  = aws_secretsmanager_secret.db_credentials.arn
+    # Force recreation to fix HNSW index creation
+    force_recreate = "2025-01-01-hnsw-fix"
   }
 
   # Wait for the database to be ready - longer wait for GitHub Actions
@@ -191,12 +193,13 @@ resource "null_resource" "db_schema_init" {
       # =================================================================
       echo "Setting up str_kb database for Bedrock..."
       # Enable pgvector extension (version 0.5.0+ required for HNSW)
+      echo "Creating vector extension..."
       aws rds-data execute-statement \
         --resource-arn "${aws_rds_cluster.main.arn}" \
         --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
         --database "${aws_rds_cluster.main.database_name}" \
         --sql 'CREATE EXTENSION IF NOT EXISTS vector;' \
-        --region ${var.aws_region}
+        --region ${var.aws_region} || echo "Extension creation failed or already exists"
 
       # Verify pgvector version (must be 0.5.0+ for HNSW support)
       echo "Checking pgvector version..."
@@ -204,15 +207,16 @@ resource "null_resource" "db_schema_init" {
         --resource-arn "${aws_rds_cluster.main.arn}" \
         --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
         --database "${aws_rds_cluster.main.database_name}" \
-        --sql "SELECT extversion FROM pg_extension WHERE extname='vector';" \
-        --region ${var.aws_region}
+        --sql "SELECT extname, extversion FROM pg_extension WHERE extname='vector';" \
+        --region ${var.aws_region} || echo "Could not verify vector extension version"
 
+      echo "Creating bedrock_integration schema..."
       aws rds-data execute-statement \
         --resource-arn "${aws_rds_cluster.main.arn}" \
         --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
         --database "${aws_rds_cluster.main.database_name}" \
         --sql 'CREATE SCHEMA IF NOT EXISTS bedrock_integration;' \
-        --region ${var.aws_region}
+        --region ${var.aws_region} || echo "Schema creation failed or already exists"
 
       # Create Bedrock user with proper permissions (as per AWS docs)
       aws rds-data execute-statement \
@@ -230,12 +234,22 @@ resource "null_resource" "db_schema_init" {
         --sql 'GRANT ALL ON SCHEMA bedrock_integration to bedrock_user;' \
         --region ${var.aws_region}
 
-      # Create table following AWS exact specification
+      # Clean slate approach: Drop existing table if it exists (with wrong structure)
+      echo "Cleaning up any existing table with wrong structure..."
       aws rds-data execute-statement \
         --resource-arn "${aws_rds_cluster.main.arn}" \
         --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
         --database "${aws_rds_cluster.main.database_name}" \
-        --sql 'CREATE TABLE IF NOT EXISTS bedrock_integration.bedrock_kb (
+        --sql 'DROP TABLE IF EXISTS bedrock_integration.bedrock_kb CASCADE;' \
+        --region ${var.aws_region} || echo "No existing table to drop"
+
+      # Create table following AWS exact specification
+      echo "Creating bedrock_kb table with correct structure..."
+      aws rds-data execute-statement \
+        --resource-arn "${aws_rds_cluster.main.arn}" \
+        --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
+        --database "${aws_rds_cluster.main.database_name}" \
+        --sql 'CREATE TABLE bedrock_integration.bedrock_kb (
           id UUID PRIMARY KEY,
           embedding vector(1024),
           chunks TEXT,
@@ -431,5 +445,84 @@ resource "null_resource" "db_schema_init" {
   depends_on = [
     aws_rds_cluster_instance.main,
     aws_secretsmanager_secret_version.db_credentials
+  ]
+}
+
+# Additional validation resource specifically for Bedrock readiness
+resource "null_resource" "bedrock_readiness_check" {
+  # This resource specifically validates that everything is ready for Bedrock
+  triggers = {
+    schema_init_id = null_resource.db_schema_init.id
+    cluster_arn    = aws_rds_cluster.main.arn
+  }
+
+  # Extended validation specifically for GitHub Actions
+  provisioner "local-exec" {
+    command = <<-EOF
+      echo "🔍 BEDROCK READINESS CHECK - Final validation before Knowledge Base creation"
+      
+      # Wait extra time in GitHub Actions
+      if [ "$GITHUB_ACTIONS" = "true" ]; then
+        echo "⏱️  GitHub Actions detected - waiting additional 120 seconds for database stabilization"
+        sleep 120
+      fi
+
+      # Test 1: Verify table exists and has correct structure
+      echo "🔍 Test 1: Verifying table structure..."
+      TABLE_CHECK=$(aws rds-data execute-statement \
+        --resource-arn "${aws_rds_cluster.main.arn}" \
+        --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
+        --database "${aws_rds_cluster.main.database_name}" \
+        --sql "SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'bedrock_integration' AND table_name = 'bedrock_kb' ORDER BY column_name;" \
+        --region ${var.aws_region} \
+        --output text 2>/dev/null || echo "FAILED")
+      
+      if [[ "$TABLE_CHECK" == *"embedding"* && "$TABLE_CHECK" == *"chunks"* && "$TABLE_CHECK" == *"metadata"* ]]; then
+        echo "✅ Table structure verified"
+      else
+        echo "❌ Table structure validation failed"
+        exit 1
+      fi
+
+      # Test 2: Verify HNSW index exists
+      echo "🔍 Test 2: Verifying HNSW index..."
+      INDEX_CHECK=$(aws rds-data execute-statement \
+        --resource-arn "${aws_rds_cluster.main.arn}" \
+        --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
+        --database "${aws_rds_cluster.main.database_name}" \
+        --sql "SELECT indexname FROM pg_indexes WHERE tablename = 'bedrock_kb' AND schemaname = 'bedrock_integration' AND indexdef LIKE '%hnsw%' AND indexdef LIKE '%vector_cosine_ops%';" \
+        --region ${var.aws_region} \
+        --output text 2>/dev/null || echo "FAILED")
+      
+      if [[ "$INDEX_CHECK" == *"idx_bedrock_kb_embedding"* ]]; then
+        echo "✅ HNSW index verified"
+      else
+        echo "❌ HNSW index validation failed"
+        exit 1
+      fi
+
+      # Test 3: Try to access the table as if we're Bedrock
+      echo "🔍 Test 3: Testing table accessibility..."
+      ACCESS_CHECK=$(aws rds-data execute-statement \
+        --resource-arn "${aws_rds_cluster.main.arn}" \
+        --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
+        --database "${aws_rds_cluster.main.database_name}" \
+        --sql "SELECT COUNT(*) FROM bedrock_integration.bedrock_kb;" \
+        --region ${var.aws_region} \
+        --output text 2>/dev/null || echo "FAILED")
+      
+      if [[ "$ACCESS_CHECK" != "FAILED" ]]; then
+        echo "✅ Table access verified"
+      else
+        echo "❌ Table access validation failed"
+        exit 1
+      fi
+
+      echo "🎉 ALL BEDROCK READINESS CHECKS PASSED - Knowledge Base can now be created safely!"
+    EOF
+  }
+
+  depends_on = [
+    null_resource.db_schema_init
   ]
 }

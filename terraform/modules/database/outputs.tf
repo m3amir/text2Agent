@@ -21,6 +21,11 @@ output "schema_initialization_id" {
   value       = null_resource.db_schema_init.id
 }
 
+output "bedrock_readiness_id" {
+  description = "Bedrock readiness validation completion ID"
+  value       = null_resource.bedrock_readiness_check.id
+}
+
 output "database_name" {
   description = "Name of the primary database (str_kb)"
   value       = aws_rds_cluster.main.database_name

@@ -142,7 +142,7 @@ module "ai" {
   db_cluster_arn            = module.database.cluster_arn
   db_master_user_secret_arn = module.database.secret_arn
   db_name                   = module.database.database_name
-  db_schema_dependency      = module.database.schema_initialization_id
+  db_schema_dependency      = module.database.bedrock_readiness_id
 }
 
 # ==============================================================================
