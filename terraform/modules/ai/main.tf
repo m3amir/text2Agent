@@ -158,16 +158,16 @@ resource "aws_bedrockagent_knowledge_base" "main" {
   storage_configuration {
     type = "RDS"
     rds_configuration {
-      credentials_secret_arn   = var.db_master_user_secret_arn
-      database_name           = var.db_name
+      credentials_secret_arn = var.db_master_user_secret_arn
+      database_name          = var.db_name
       resource_arn           = var.db_cluster_arn
       table_name             = "bedrock_integration.bedrock_kb"
-      
+
       field_mapping {
-        primary_key_field    = "id"
-        vector_field         = "embedding"
-        text_field           = "chunks"
-        metadata_field       = "metadata"
+        primary_key_field = "id"
+        vector_field      = "embedding"
+        text_field        = "chunks"
+        metadata_field    = "metadata"
       }
     }
   }
@@ -188,13 +188,13 @@ resource "aws_bedrockagent_knowledge_base" "main" {
 
 resource "aws_bedrockagent_data_source" "s3_documents" {
   knowledge_base_id = aws_bedrockagent_knowledge_base.main.id
-  name             = "${var.project_name}-${var.environment}-s3-data-source"
+  name              = "${var.project_name}-${var.environment}-s3-data-source"
 
   data_source_configuration {
     type = "S3"
     s3_configuration {
-      bucket_arn                = var.s3_bucket_arn
-      inclusion_prefixes        = ["documents/"]
+      bucket_arn         = var.s3_bucket_arn
+      inclusion_prefixes = ["documents/"]
     }
   }
 }

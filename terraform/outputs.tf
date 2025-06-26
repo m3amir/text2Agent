@@ -171,14 +171,14 @@ output "aws_region" {
 output "infrastructure_summary" {
   description = "Summary of deployed infrastructure"
   value = {
-    vpc_id                    = aws_vpc.main.id
-    aurora_cluster           = aws_rds_cluster.aurora.cluster_identifier
-    aurora_instance          = aws_rds_cluster_instance.aurora.identifier
-    s3_bucket                = aws_s3_bucket.documents.bucket
-    bedrock_knowledge_base   = aws_bedrockagent_knowledge_base.main.name
-    cognito_user_pool        = module.auth.cognito_user_pool_id
-    lambda_function          = module.auth.post_confirmation_lambda_name
-    bedrock_kb_id            = aws_bedrockagent_knowledge_base.main.id
-    bedrock_data_source_id   = aws_bedrockagent_data_source.s3.data_source_id
+    vpc_id                 = aws_vpc.main.id
+    aurora_cluster         = aws_rds_cluster.aurora.cluster_identifier
+    aurora_instance        = aws_rds_cluster_instance.aurora.identifier
+    s3_bucket              = aws_s3_bucket.documents.bucket
+    bedrock_knowledge_base = aws_bedrockagent_knowledge_base.main.name
+    cognito_user_pool      = module.auth.cognito_user_pool_id
+    lambda_function        = module.auth.post_confirmation_lambda_name
+    bedrock_kb_id          = aws_bedrockagent_knowledge_base.main.id
+    bedrock_data_source_id = aws_bedrockagent_data_source.s3.data_source_id
   }
 } 

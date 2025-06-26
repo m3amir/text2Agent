@@ -76,30 +76,30 @@ resource "aws_security_group" "aurora" {
 
 # Aurora PostgreSQL cluster with pgvector
 resource "aws_rds_cluster" "aurora" {
-  cluster_identifier     = "str-kb"
-  engine                 = "aurora-postgresql"
-  engine_version         = "16.6"
-  database_name          = "bedrock_kb"
-  master_username        = "postgres"
+  cluster_identifier          = "str-kb"
+  engine                      = "aurora-postgresql"
+  engine_version              = "16.6"
+  database_name               = "bedrock_kb"
+  master_username             = "postgres"
   manage_master_user_password = true
-  
+
 
   db_subnet_group_name   = aws_db_subnet_group.main.name
   vpc_security_group_ids = [aws_security_group.aurora.id]
-  
+
   # Enable Data API for Bedrock
   enable_http_endpoint = true
-  
+
   # Serverless v2 scaling
   serverlessv2_scaling_configuration {
     min_capacity = 0.5
     max_capacity = 2.0
   }
-  
-  storage_encrypted      = true
+
+  storage_encrypted       = true
   backup_retention_period = 7
-  skip_final_snapshot    = var.environment == "dev" ? true : false
-  deletion_protection    = var.environment == "prod" ? true : false
+  skip_final_snapshot     = var.environment == "dev" ? true : false
+  deletion_protection     = var.environment == "prod" ? true : false
 
   tags = {
     Name        = "str-kb"
@@ -129,7 +129,7 @@ resource "aws_rds_cluster_instance" "aurora" {
 # S3 bucket for documents
 resource "aws_s3_bucket" "documents" {
   bucket = "str-data-store-bucket"
-  
+
   tags = {
     Project     = var.project_name
     Environment = var.environment
@@ -288,14 +288,14 @@ resource "null_resource" "init_database" {
         --sql "CREATE INDEX IF NOT EXISTS bedrock_kb_embedding_hnsw_idx ON bedrock_integration.bedrock_kb USING hnsw (embedding vector_cosine_ops);" \
         --region "${var.aws_region}"
     EOF
-    
+
     environment = {
       AWS_PROFILE = var.aws_profile
     }
   }
-  
+
   depends_on = [aws_rds_cluster_instance.aurora]
-  
+
   triggers = {
     cluster_arn = aws_rds_cluster.aurora.arn
     secret_arn  = aws_rds_cluster.aurora.master_user_secret[0].secret_arn
@@ -320,14 +320,14 @@ resource "aws_bedrockagent_knowledge_base" "main" {
   storage_configuration {
     type = "RDS"
     rds_configuration {
-      resource_arn    = aws_rds_cluster.aurora.arn
+      resource_arn           = aws_rds_cluster.aurora.arn
       credentials_secret_arn = aws_rds_cluster.aurora.master_user_secret[0].secret_arn
-      database_name   = aws_rds_cluster.aurora.database_name
-      table_name      = "bedrock_integration.bedrock_kb"
+      database_name          = aws_rds_cluster.aurora.database_name
+      table_name             = "bedrock_integration.bedrock_kb"
       field_mapping {
-        vector_field   = "embedding"
-        text_field     = "chunks"
-        metadata_field = "metadata"
+        vector_field      = "embedding"
+        text_field        = "chunks"
+        metadata_field    = "metadata"
         primary_key_field = "id"
       }
     }
@@ -367,13 +367,13 @@ resource "aws_bedrockagent_data_source" "s3" {
 module "auth" {
   source = "./modules/auth"
 
-  project_name         = var.project_name
-  environment          = var.environment
-  aws_region           = var.aws_region
-  lambda_zip_path      = "./post_confirmation.zip"
-  database_host        = aws_rds_cluster.aurora.endpoint
-  vpc_id               = aws_vpc.main.id
-  private_subnet_ids   = aws_subnet.private[*].id
+  project_name          = var.project_name
+  environment           = var.environment
+  aws_region            = var.aws_region
+  lambda_zip_path       = "./post_confirmation.zip"
+  database_host         = aws_rds_cluster.aurora.endpoint
+  vpc_id                = aws_vpc.main.id
+  private_subnet_ids    = aws_subnet.private[*].id
   rds_security_group_id = aws_security_group.aurora.id
 }
 
