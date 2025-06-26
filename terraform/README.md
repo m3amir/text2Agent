@@ -1,689 +1,834 @@
-# Text2Agent AWS Infrastructure
+# Text2Agent Infrastructure
 
-This Terraform configuration deploys a complete AWS infrastructure for the Text2Agent project, including a serverless architecture with Aurora PostgreSQL, Bedrock Knowledge Base, Cognito authentication, Lambda functions, and S3 storage.
+This directory contains the complete Terraform infrastructure for the Text2Agent project - a production-ready Bedrock Knowledge Base system with Aurora PostgreSQL vector database, designed for multi-tenant document search and AI-powered applications.
 
-## Architecture Overview
+## 🏗️ Architecture Overview
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                         VPC (10.0.0.0/16)                  │
-├─────────────────────────┬───────────────────────────────────┤
-│    Public Subnets       │        Private Subnets            │
-│                         │                                   │
-│  ┌─────────────────┐   │  ┌─────────────────────────────┐  │
-│  │  NAT Gateway    │   │  │     RDS Aurora Cluster      │  │
-│  │                 │   │  │   (PostgreSQL 15.4)         │  │
-│  └─────────────────┘   │  │    with Data API            │  │
-│                         │  │                             │  │
-│  ┌─────────────────┐   │  │  ┌─────────┐ ┌─────────┐   │  │
-│  │ Internet Gateway│   │  │  │Instance1│ │Instance2│   │  │
-│  └─────────────────┘   │  │  └─────────┘ └─────────┘   │  │
-│                         │  └─────────────────────────────┘  │
-└─────────────────────────┴───────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────┐
-│                  Amazon Bedrock Knowledge Base             │
-│          (Vector Search with Aurora PostgreSQL)            │
-│                                                             │
-│  ┌─────────────────┐   ┌─────────────────────────────┐    │
-│  │   S3 Data       │   │    Aurora PostgreSQL        │    │
-│  │   Source        │──▶│   (pgvector extension)      │    │
-│  └─────────────────┘   └─────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────┐
-│                     Authentication & APIs                  │
-│                                                             │
-│  ┌─────────────────┐   ┌─────────────────────────────┐    │
-│  │   Cognito User  │   │      Lambda Functions       │    │
-│  │      Pool       │   │   (Post-confirmation)       │    │
-│  └─────────────────┘   └─────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                         Text2Agent Infrastructure                                │
+│                        (Account: 994626600571, Region: eu-west-2)              │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                 │
+│  ┌─────────────────┐   ┌──────────────────┐   ┌─────────────────────────────┐  │
+│  │   Cognito       │   │   S3 Bucket      │   │   Aurora Cluster            │  │
+│  │ User Pool       │   │ str-data-store-  │   │ text2agent-dev-cluster      │  │
+│  │ + Lambda Hooks  │   │ bucket           │   │ (PostgreSQL 15.4)           │  │
+│  └─────────────────┘   └──────────────────┘   └─────────────────────────────┘  │
+│         │                        │                          │                  │
+│         │                        │                          │                  │
+│         ▼                        ▼                          ▼                  │
+│  ┌─────────────────┐   ┌──────────────────┐   ┌─────────────────────────────┐  │
+│  │ Lambda Post-    │   │   Bedrock        │   │   Database 1: str_kb        │  │
+│  │ Confirmation    │   │ Knowledge Base   │   │   • bedrock_integration     │  │
+│  │ (User mgmt)     │   │ ID: Generated    │   │   • HNSW vector index       │  │
+│  └─────────────────┘   └──────────────────┘   │                             │  │
+│                                                │   Database 2: text2Agent-   │  │
+│                                                │   Tenants                   │  │
+│                                                │   • tenantmappings          │  │
+│                                                │   • users                   │  │
+│                                                └─────────────────────────────┘  │
+│                                                                                 │
+│              ┌─────────────────────────────────────────────────────┐           │
+│              │                   VPC Network                       │           │
+│              │  ┌─────────────┐              ┌─────────────────┐   │           │
+│              │  │ Public      │              │ Private         │   │           │
+│              │  │ Subnets     │              │ Subnets         │   │           │
+│              │  │ (NAT GW)    │              │ (DB, Lambda)    │   │           │
+│              │  │ AZ-a, AZ-b  │              │ AZ-a, AZ-b      │   │           │
+│              │  └─────────────┘              └─────────────────┘   │           │
+│              └─────────────────────────────────────────────────────┘           │
+└─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-## File Structure & Purpose
+### Data Flow Architecture
+```
+Documents (PDF/TXT) → S3 Bucket → Bedrock Knowledge Base → Titan Embeddings 
+                                         ↓
+Vector Embeddings (1024d) → Aurora PostgreSQL → HNSW Index → Fast Search
+                                         ↓
+User Queries → Semantic Search → Top-K Results → Application
+```
 
-### Core Terraform Files
+## 📂 Detailed Module Structure
 
-| File | Purpose | Description |
-|------|---------|-------------|
-| `terraform.tf` | Provider Configuration | Defines required providers (AWS, random, local) and AWS provider settings including the "m3" profile |
-| `variables.tf` | Variable Definitions | Declares all input variables with types, defaults, and descriptions |
-| `terraform.tfvars` | Variable Values | Sets actual values for variables (customize this for your environment) |
-| `outputs.tf` | Output Values | Defines output values that are displayed after deployment |
-| `main.tf` | Main Configuration | Contains the random ID generator and primary resource references |
+This infrastructure uses a **modular approach** for better organization, reusability, and dependency management:
 
-### Infrastructure Modules
+```
+terraform/
+├── main.tf              # Root module - orchestrates all child modules
+├── variables.tf         # Input variables (project_name, environment, etc.)
+├── outputs.tf           # Output values (endpoints, IDs, connection strings)
+├── terraform.tfvars     # Variable values (gitignored - local only)
+├── backend.tf           # S3 backend configuration for state management
+└── modules/
+    ├── networking/      # Module 1: VPC Foundation
+    │   ├── main.tf      # VPC, subnets (public/private), route tables
+    │   ├── variables.tf # CIDR blocks, AZ configuration
+    │   └── outputs.tf   # VPC ID, subnet IDs, security group IDs
+    │
+    ├── security/        # Module 2: IAM & Secrets
+    │   ├── main.tf      # IAM roles, policies, Secrets Manager
+    │   ├── variables.tf # Role configurations, policy permissions
+    │   └── outputs.tf   # Role ARNs, secret ARNs, policy attachments
+    │
+    ├── storage/         # Module 3: S3 Storage
+    │   ├── main.tf      # S3 bucket with versioning, encryption
+    │   ├── variables.tf # Bucket naming, lifecycle policies
+    │   └── outputs.tf   # Bucket name, bucket ARN
+    │
+    ├── database/        # Module 4: Aurora PostgreSQL
+    │   ├── main.tf      # Aurora cluster, instances, parameter groups
+    │   ├── variables.tf # DB configuration, instance types
+    │   ├── outputs.tf   # Endpoints, connection details
+    │   └── scripts/     # SQL initialization scripts
+    │       ├── init_str_kb.sql           # Bedrock database setup
+    │       └── init_text2agent_tenants.sql # Tenant management setup
+    │
+    ├── ai/              # Module 5: Bedrock Knowledge Base
+    │   ├── main.tf      # Knowledge Base, Data Source configurations
+    │   ├── variables.tf # Model selection, indexing parameters
+    │   └── outputs.tf   # Knowledge Base ID, Data Source ID
+    │
+    └── auth/            # Module 6: Authentication & User Management
+        ├── main.tf      # Cognito User Pool, Lambda functions
+        ├── variables.tf # Pool configuration, Lambda settings
+        ├── outputs.tf   # User Pool ID, Lambda function ARNs
+        └── lambda/      # Lambda function source code
+            ├── post_confirmation.py      # User registration handler
+            └── requirements.txt          # Python dependencies
+```
 
-| File | Purpose | Description |
-|------|---------|-------------|
-| `vpc.tf` | Networking | Creates VPC, subnets, internet gateway, NAT gateways, and route tables |
-| `rds.tf` | Database | Deploys Aurora PostgreSQL cluster with serverless v2 scaling and Data API |
-| `s3.tf` | Object Storage | Creates encrypted S3 bucket with versioning for document storage |
-| `secrets.tf` | Secrets Management | Manages database credentials in AWS Secrets Manager |
-| `iam.tf` | IAM Roles | Creates IAM roles and policies for various services |
-| `cognito.tf` | Authentication | Sets up Cognito User Pool and User Pool Client for authentication |
-| `lambda.tf` | Serverless Functions | Deploys Lambda functions for user management and triggers |
-| `bedrock_knowledge_base.tf` | AI/ML Services | Configures Bedrock Knowledge Base with Aurora PostgreSQL backend |
+### Module Dependencies
+```
+networking (VPC, subnets)
+    ↓
+security (IAM roles, secrets) + storage (S3 bucket)
+    ↓
+database (Aurora cluster) - depends on: networking, security
+    ↓
+ai (Bedrock KB) - depends on: database, storage, security
+    ↓
+auth (Cognito + Lambda) - depends on: database, security
+```
 
-### Support Files
+**Key Design Principles:**
+- **Separation of Concerns**: Each module handles one infrastructure domain
+- **Dependency Management**: Modules depend on outputs from prerequisite modules
+- **Reusability**: Modules can be reused across environments (dev/staging/prod)
+- **State Isolation**: Each module can be planned/applied independently
+- **Security First**: IAM roles follow least-privilege principles
 
-| File | Purpose | Description |
-|------|---------|-------------|
-| `setup_bedrock_database.sql` | Database Setup | SQL commands to initialize the database for Bedrock Knowledge Base |
-| `package_lambda.sh` | Build Script | Shell script to package Lambda functions for deployment |
-| `lambda_functions/` | Function Code | Directory containing Lambda function source code |
-| `.terraform.lock.hcl` | Dependency Lock | Locks provider versions for consistent deployments |
-| `terraform.tfstate*` | State Files | Tracks the current state of deployed infrastructure |
+## 🔄 How Terraform Works: Infrastructure as Code
 
-## Prerequisites
+### Terraform State Management
 
-1. **AWS CLI** configured with "m3" profile
-   ```bash
-   aws configure --profile m3
-   # Enter your access key, secret key, region (us-west-2), and output format (json)
-   ```
+Terraform tracks your infrastructure using a **state file** that maps your configuration to real AWS resources:
 
-2. **Terraform** >= 1.0 installed
-   ```bash
-   # macOS
-   brew install terraform
-   
-   # Or download from https://www.terraform.io/downloads
-   ```
+```
+Local Config (*.tf files) ←→ Terraform State ←→ AWS Resources
+```
 
-3. **Required AWS IAM Permissions**:
-   - VPC management (EC2)
-   - RDS Aurora management
-   - S3 bucket management
-   - Secrets Manager access
-   - Cognito management
-   - Lambda management
-   - Bedrock access
-   - IAM role/policy management
+**State File Location:**
+- **Local Development**: `.terraform/terraform.tfstate` (temporary)
+- **Production**: S3 backend `s3://text2agent-terraform-state-eu-west-2/text2agent/production/terraform.tfstate`
 
-## Quick Start Guide
+**Why State Matters:**
+- **Tracks Resource Ownership**: Knows which AWS resources belong to this Terraform config
+- **Enables Updates**: Can modify existing resources instead of recreating them
+- **Prevents Drift**: Detects when AWS resources have been changed outside Terraform
+- **Dependency Resolution**: Understands the order in which resources must be created/destroyed
 
-### 1. Initial Setup
+### Terraform Operations Explained
+
+#### 1. `terraform plan` - Preview Changes
+```bash
+terraform plan -var="aws_profile=m3"
+```
+**What it does:**
+- Compares your `.tf` files against current state
+- Queries AWS to check actual resource status
+- Shows exactly what will be created/modified/destroyed
+- **NEVER** makes actual changes - it's completely safe
+
+**Example output:**
+```
+Plan: 5 to add, 2 to change, 1 to destroy.
+
++ aws_db_cluster.aurora_cluster
++ aws_s3_bucket.documents
+~ aws_iam_role.bedrock_role
+  - aws_security_group.old_sg
+```
+
+#### 2. `terraform apply` - Make Changes
+```bash
+terraform apply -var="aws_profile=m3"
+```
+**What it does:**
+- Runs `terraform plan` first
+- Asks for confirmation (unless `-auto-approve`)
+- Executes the planned changes in correct order
+- Updates the state file
+- Shows outputs when complete
+
+#### 3. `terraform destroy` - Remove Everything
+```bash
+terraform destroy -var="aws_profile=m3"
+```
+**⚠️ DANGER**: This deletes ALL resources managed by this Terraform config!
+
+### Resource Lifecycle: What Gets Created/Updated/Destroyed
+
+#### 🟢 Resources That Update In-Place (No Downtime)
+These can be modified without recreating:
+- **Tags** on any resource
+- **IAM policy** attachments
+- **Lambda function** code
+- **S3 bucket** policies
+- **Cognito User Pool** attributes (most)
+- **Aurora cluster** parameter changes
+
+#### 🟡 Resources That Force Replacement (Recreates Resource)
+These changes destroy the old resource and create a new one:
+- **Aurora cluster identifier** change
+- **VPC CIDR block** change
+- **Database name** changes
+- **S3 bucket name** changes
+- **Lambda function name** changes
+
+#### 🔴 Destructive Operations (Data Loss Risk)
+These operations will DELETE data:
+- Changing Aurora cluster identifier → **Old database destroyed**
+- Changing S3 bucket name → **Old bucket destroyed**
+- Running `terraform destroy` → **Everything destroyed**
+
+### When Terraform Deletes Resources
+
+Terraform will delete resources in these scenarios:
+
+#### 1. **Resource Removed from Configuration**
+```hcl
+# If you remove this block from your .tf files:
+# resource "aws_s3_bucket" "example" {
+#   bucket = "my-bucket"
+# }
+```
+**Result**: Terraform will delete the S3 bucket on next `apply`
+
+#### 2. **Resource Name Changed**
+```hcl
+# Old:
+resource "aws_db_cluster" "old_name" { ... }
+# New:
+resource "aws_db_cluster" "new_name" { ... }
+```
+**Result**: Terraform creates new cluster, then destroys old one
+
+#### 3. **Identifier/Name Properties Changed**
+```hcl
+resource "aws_db_cluster" "aurora" {
+  cluster_identifier = "new-cluster-name"  # Changed from "old-cluster-name"
+}
+```
+**Result**: Forces replacement - destroys old cluster, creates new one
+
+#### 4. **Dependency Changes**
+If a parent resource is replaced, dependent resources are also replaced:
+```
+VPC replacement → Subnets replaced → Aurora cluster replaced
+```
+
+### Preventing Accidental Deletions
+
+#### 1. **Use `terraform plan` First**
+Always preview changes before applying:
+```bash
+terraform plan -var="aws_profile=m3" | grep -E "(destroy|replace)"
+```
+
+#### 2. **Lifecycle Rules**
+```hcl
+resource "aws_db_cluster" "aurora" {
+  lifecycle {
+    prevent_destroy = true  # Prevents accidental deletion
+  }
+}
+```
+
+#### 3. **State Backup**
+Before major changes:
+```bash
+# Backup state file
+cp terraform.tfstate terraform.tfstate.backup
+```
+
+#### 4. **Import Existing Resources**
+If you have existing AWS resources:
+```bash
+terraform import aws_s3_bucket.existing my-existing-bucket
+```
+
+## Deployment Methods
+
+### Method 1: GitHub Actions (Recommended)
+
+**Fully automated deployment through GitHub:**
+
+1. **Push to main branch** → Triggers deployment
+2. **GitHub Actions** runs Terraform automatically
+3. **No local setup required!**
 
 ```bash
-# Navigate to terraform directory
-cd terraform
-
-# Activate Python virtual environment (if using one)
-source ../venv/bin/activate
-
-# Copy example variables (if it exists, or use existing terraform.tfvars)
-# The terraform.tfvars file contains your environment-specific settings
-cat terraform.tfvars
+# Just push your changes:
+git add .
+git commit -m "Deploy infrastructure"
+git push origin main
 ```
 
-### 2. Initialize Terraform
+**GitHub Actions Process:**
+1. **Checkout code** from repository
+2. **Setup Terraform** (latest version)
+3. **Configure AWS credentials** (from GitHub Secrets)
+4. **Initialize backend** (`terraform init`)
+5. **Validate syntax** (`terraform validate`)
+6. **Format check** (`terraform fmt -check`)
+7. **Generate plan** (`terraform plan`)
+8. **Apply changes** (`terraform apply -auto-approve`)
+9. **Display outputs** (connection details)
+
+### Method 2: Local Deployment
+
+**For development and testing:**
 
 ```bash
-# Download providers and modules
+# 1. Navigate to terraform directory
+cd terraform/
+
+# 2. Initialize Terraform (downloads providers, configures backend)
 terraform init
 
-# If you need to upgrade providers (required for null provider)
-terraform init -upgrade
+# 3. Plan the deployment (see what will be created)
+terraform plan -var="aws_profile=m3"
+
+# 4. Apply the changes (creates actual resources)
+terraform apply -var="aws_profile=m3"
 ```
 
-**What this does**: Downloads the AWS, random, local, and null providers specified in `terraform.tf` and initializes the backend for state management.
+**Local Development Benefits:**
+- **Faster feedback** - no CI/CD wait time
+- **Debug capability** - can inspect state and troubleshoot
+- **Partial deployments** - can target specific modules
+- **State inspection** - can examine current infrastructure state
 
-### 3. Plan Deployment
+## Configuration
+
+### Required Variables
+
+Create a `terraform.tfvars` file with:
+
+```hcl
+# Basic Configuration
+project_name = "text2agent"
+environment  = "dev"
+aws_region   = "eu-west-2"
+
+# Local development only (not needed for GitHub Actions)
+aws_profile = "m3"
+```
+
+### AWS Profile Setup (Local Only)
+
+For local deployment, ensure your AWS profile is configured:
 
 ```bash
-# See what will be created/changed/destroyed
-terraform plan
+# Check if profile exists
+aws configure list-profiles
 
-# Save plan to file for review
-terraform plan -out=tfplan
+# If 'm3' profile doesn't exist, create it:
+aws configure --profile m3
 ```
 
-**What this does**: Compares your configuration files against the current state and shows exactly what Terraform will do without making any changes.
+## 🗄️ Database Architecture
 
-### 4. Deploy Infrastructure (Current Process)
+### Two Databases in One Aurora Cluster
 
+The system creates **one Aurora PostgreSQL cluster** with **two separate databases**:
+
+#### 1. **str_kb Database** (Bedrock Knowledge Base)
+```sql
+Database: str_kb
+└── Schema: bedrock_integration
+    └── Table: bedrock_kb
+        ├── id (UUID)
+        ├── embedding (vector(1024))  ← HNSW indexed for fast similarity search
+        ├── chunks (TEXT)
+        └── metadata (JSON)
+```
+
+#### 2. **text2AgentTenants Database** (Multi-tenant Management)
+```sql
+Database: text2AgentTenants
+├── Table: tenantmappings
+│   ├── tenant_id (UUID)
+│   ├── domain (VARCHAR)
+│   └── bucket_name (VARCHAR)
+└── Table: users
+    ├── user_id (UUID)
+    ├── email (VARCHAR)
+    ├── tenant_id (UUID)
+    └── cognito_sub (VARCHAR)
+```
+
+## AI/ML Components
+
+### Amazon Bedrock Knowledge Base
+- **Model**: Amazon Titan Text Embeddings v2
+- **Vector Dimensions**: 1024
+- **Storage**: Aurora PostgreSQL with pgvector
+- **Index Type**: HNSW (Hierarchical Navigable Small World)
+- **Purpose**: Fast semantic search over document embeddings
+
+### Document Processing Flow
+```
+Documents (S3) → Bedrock → Embeddings → Aurora PostgreSQL → Search Results
+```
+
+## Security Features
+
+- **VPC Isolation**: All resources in private subnets
+- **IAM Roles**: Least-privilege access patterns
+- **Secrets Manager**: Database credentials securely stored
+- **Encryption**: 
+  - Aurora: Encryption at rest
+  - S3: Server-side encryption
+  - Secrets: Encrypted with KMS
+
+## What Gets Created
+
+When you deploy, Terraform creates:
+
+### Networking (6 resources)
+- 1 VPC with DNS hostnames enabled
+- 2 Public subnets (for NAT gateways)
+- 2 Private subnets (for databases/apps)
+- Route tables and NAT gateways
+
+### Database (5 resources)
+- 1 Aurora PostgreSQL cluster (`text2agent-dev-cluster`)
+- 1 Aurora instance (serverless)
+- 1 Secrets Manager secret (database credentials)
+- 2 Databases with proper schemas and indexes
+
+### AI/ML (2 resources)
+- 1 Bedrock Knowledge Base
+- 1 S3 Data Source connector
+
+### Authentication (4 resources)
+- 1 Cognito User Pool
+- 1 Lambda function (post-confirmation)
+- 1 Lambda layer (dependencies)
+- IAM roles and policies
+
+### Storage (1 resource)
+- 1 S3 bucket (`str-data-store-bucket`)
+
+**Total: ~25-30 AWS resources**
+
+## ⚡ Terraform Commands Reference
+
+### Basic Operations
 ```bash
-# Apply all changes with automated Bedrock setup
-terraform apply
+# Initialize (required first time and after backend changes)
+terraform init
 
-# Or apply from saved plan
-terraform apply tfplan
+# See what's currently deployed
+terraform state list
 
-# Auto-approve (skip confirmation prompt) - Use with caution
-terraform apply -auto-approve
+# Check configuration syntax
+terraform validate
+
+# Format code (fixes indentation, style)
+terraform fmt
+
+# Check plan without applying (safe)
+terraform plan -var="aws_profile=m3"
+
+# Deploy everything
+terraform apply -var="aws_profile=m3"
+
+# Deploy with automatic approval (CI/CD)
+terraform apply -var="aws_profile=m3" -auto-approve
+
+# Destroy everything (⚠️ DESTRUCTIVE)
+terraform destroy -var="aws_profile=m3"
 ```
 
-**What this does**: Creates all the AWS resources in the following order with automated fixes:
-
-#### Phase 1: Core Infrastructure (2-3 minutes)
-1. **VPC & Networking**: Creates VPC, subnets, internet gateway, NAT gateways
-2. **Security Groups**: Sets up RDS and Lambda security groups
-3. **IAM Roles**: Creates roles for RDS monitoring, Lambda, and Bedrock services
-4. **S3 Buckets**: Creates main bucket and structured data store with encryption
-
-#### Phase 2: Database Setup (8-12 minutes)
-5. **Aurora PostgreSQL Cluster**: Creates serverless Aurora cluster with Data API enabled
-6. **Aurora Instances**: Provisions database instances (this takes the longest)
-7. **Secrets Manager**: Stores database credentials securely
-8. **Database Validation**: Waits for cluster to be fully available
-
-#### Phase 3: Automated Bedrock Database Setup (1-2 minutes)
-9. **Database Schema Creation**: Automatically runs via `null_resource.bedrock_db_setup`:
-   ```sql
-   -- Creates vector extension for embeddings
-   CREATE EXTENSION IF NOT EXISTS vector;
-   
-   -- Creates dedicated schema for Bedrock
-   CREATE SCHEMA IF NOT EXISTS bedrock_integration;
-   
-   -- Creates optimized table for vector storage
-   CREATE TABLE bedrock_integration.bedrock_kb (
-     id uuid PRIMARY KEY,
-     embedding vector(1024),
-     chunks text,
-     metadata json
-   );
-   
-   -- Creates indexes for optimal performance
-   CREATE INDEX ON bedrock_integration.bedrock_kb USING hnsw (embedding vector_cosine_ops);
-   ```
-
-#### Phase 4: Authentication & Serverless (2-3 minutes)
-10. **Cognito User Pool**: Sets up authentication system
-11. **Lambda Functions**: Deploys post-confirmation triggers
-12. **Lambda Permissions**: Configures Cognito-Lambda integration
-
-#### Phase 5: Bedrock Knowledge Base (3-5 minutes)
-13. **Bedrock Knowledge Base**: Creates the knowledge base with Aurora PostgreSQL backend
-14. **S3 Data Source**: Links the S3 bucket as a data source
-15. **Data Source Sync**: Configures automatic document ingestion
-
-### 5. Automated Database Setup (Now Included)
-
-**✅ No Manual Steps Required**: The database setup is now fully automated through Terraform!
-
-The `null_resource.bedrock_db_setup` automatically:
-- Uses the correct AWS profile (`m3`) and region (`us-west-2`)
-- Waits for the RDS cluster to be fully available
-- Creates the `vector` extension for embeddings
-- Sets up the `bedrock_integration` schema
-- Creates the optimized vector table with proper indexes
-- Uses the same credentials as the Bedrock Knowledge Base
-
-**Previous Manual Process** (now automated):
-```bash
-# This is no longer needed - it's automated!
-aws rds-data execute-statement \
-  --profile m3 \
-  --region us-west-2 \
-  --resource-arn "$(terraform output -raw aurora_cluster_arn)" \
-  --database "postgres" \
-  --secret-arn "$(terraform output -raw db_password_secret_arn)" \
-  --sql "$(cat setup_bedrock_database.sql)"
-```
-
-### 6. View Deployment Results
-
-```bash
-# Show all outputs after deployment completes
-terraform output
-
-# Key outputs to verify successful deployment:
-terraform output bedrock_knowledge_base_id
-terraform output aurora_cluster_endpoint  
-terraform output s3_bucket_id
-terraform output cognito_user_pool_id
-```
-
-## Current Deployment Status
-
-The infrastructure deployment includes several **critical fixes** for Bedrock Knowledge Base integration:
-
-### ✅ Issues Resolved
-
-1. **Region Mismatch**: All AWS CLI commands now use explicit `--region us-west-2`
-2. **Profile Configuration**: All commands use the correct `--profile m3` 
-3. **Authentication**: Bedrock now uses the main `postgres` user instead of a separate `bedrock_user`
-4. **Password Synchronization**: Both RDS and Bedrock use the same credential source
-5. **Timing Issues**: Added proper dependency chains and wait conditions
-6. **Automated Setup**: Database schema creation is fully automated via Terraform
-
-### 🔄 Deployment Process
-
-The current `terraform apply` will:
-1. Create a clean infrastructure from scratch
-2. Automatically configure the database for Bedrock
-3. Establish proper authentication between services
-4. Set up the complete vector search pipeline
-
-**Expected Total Time**: 15-20 minutes
-
-**No Manual Intervention Required**: Everything is automated!
-
-## Monitoring Current Deployment
-
-### Real-time Progress Tracking
-
-```bash
-# Check if Terraform is still running
-ps aux | grep terraform
-
-# Monitor AWS resources being created
-watch -n 30 'aws ec2 describe-vpcs --profile m3 --region us-west-2 --query "Vpcs[?Tags[?Key=='\''Project'\'' && Value=='\''text2agent'\'']].VpcId" --output table'
-
-# Check RDS cluster status
-aws rds describe-db-clusters --profile m3 --region us-west-2 --query "DBClusters[?DBClusterIdentifier=='text2agent-aurora-cluster'].Status" --output text
-
-# Monitor Bedrock Knowledge Base creation
-aws bedrock-agent list-knowledge-bases --profile m3 --region us-west-2 --query "knowledgeBaseSummaries[?name=='text2agent-dev-knowledge-base']" --output table
-```
-
-### Deployment Phase Indicators
-
-**Phase 1 Complete** - When you see:
-```
-aws_vpc.main: Creation complete
-aws_subnet.public[0]: Creation complete
-aws_internet_gateway.main: Creation complete
-```
-
-**Phase 2 Complete** - When you see:
-```
-aws_rds_cluster.main: Creation complete
-aws_rds_cluster_instance.main[0]: Creation complete
-```
-
-**Phase 3 Complete** - When you see:
-```
-null_resource.bedrock_db_setup: Creation complete
-local_file.bedrock_db_setup_script: Creation complete
-```
-
-**Phase 4 Complete** - When you see:
-```
-aws_cognito_user_pool.main: Creation complete
-aws_lambda_function.post_confirmation: Creation complete
-```
-
-**Phase 5 Complete** - When you see:
-```
-aws_bedrockagent_knowledge_base.main: Creation complete
-aws_bedrockagent_data_source.s3_data_source: Creation complete
-```
-
-### If Issues Occur During Deployment
-
-#### Database Setup Failures
-If `null_resource.bedrock_db_setup` fails:
-```bash
-# Check the specific error in Terraform output
-# Common issues and solutions:
-
-# 1. AWS CLI not found or wrong profile
-aws sts get-caller-identity --profile m3
-
-# 2. RDS cluster not ready - just retry
-terraform apply -target=null_resource.bedrock_db_setup
-
-# 3. Permission issues - verify IAM
-aws rds describe-db-clusters --profile m3 --region us-west-2
-```
-
-#### Bedrock Knowledge Base Failures
-If the Knowledge Base creation fails:
-```bash
-# Check if the database table was created
-aws rds-data execute-statement \
-  --profile m3 \
-  --region us-west-2 \
-  --resource-arn "$(terraform output -raw aurora_cluster_arn)" \
-  --database "postgres" \
-  --secret-arn "$(terraform output -raw db_password_secret_arn)" \
-  --sql "SELECT table_name FROM information_schema.tables WHERE table_schema = 'bedrock_integration';"
-
-# Retry Knowledge Base creation specifically
-terraform apply -target=aws_bedrockagent_knowledge_base.main
-```
-
-#### Network/Timeout Issues
-```bash
-# Check VPC and networking
-aws ec2 describe-vpcs --profile m3 --region us-west-2 --filters "Name=tag:Project,Values=text2agent"
-
-# Verify NAT gateways are ready
-aws ec2 describe-nat-gateways --profile m3 --region us-west-2 --filter "Name=tag:Project,Values=text2agent"
-```
-
-### Success Indicators
-
-**✅ Deployment Successful** when you see:
-```
-Apply complete! Resources: 63 added, 0 changed, 0 destroyed.
-
-Outputs:
-bedrock_knowledge_base_id = "XXXXXXXXX"
-aurora_cluster_endpoint = "text2agent-aurora-cluster.cluster-xxxxx.us-west-2.rds.amazonaws.com"
-s3_bucket_id = "text2agent-dev-xxxxxxxx"
-```
-
-**Test the Complete System**:
-```bash
-# 1. Test database connection
-aws rds-data execute-statement \
-  --profile m3 \
-  --region us-west-2 \
-  --resource-arn "$(terraform output -raw aurora_cluster_arn)" \
-  --database "postgres" \
-  --secret-arn "$(terraform output -raw db_password_secret_arn)" \
-  --sql "SELECT version();"
-
-# 2. Upload a test document
-aws s3 cp README.md s3://$(terraform output -raw s3_bucket_id)/test-doc.md --profile m3
-
-# 3. Check Knowledge Base status
-aws bedrock-agent get-knowledge-base \
-  --profile m3 \
-  --region us-west-2 \
-  --knowledge-base-id "$(terraform output -raw bedrock_knowledge_base_id)"
-```
-
-## Essential Terraform Commands
-
-### State Management
-
+### Advanced State Management
 ```bash
 # List all resources in state
 terraform state list
 
-# Show details of specific resource
-terraform state show aws_rds_cluster.main
+# Show detailed info about a resource
+terraform state show aws_db_cluster.aurora_cluster
 
-# Remove resource from state (without destroying)
-terraform state rm aws_s3_bucket.main
+# Remove a resource from state (doesn't delete AWS resource)
+terraform state rm aws_s3_bucket.example
 
 # Import existing AWS resource into state
-terraform import aws_s3_bucket.main my-existing-bucket-name
+terraform import aws_s3_bucket.existing my-existing-bucket-name
+
+# Move resource in state (useful for refactoring)
+terraform state mv aws_s3_bucket.old aws_s3_bucket.new
+
+# Refresh state with actual AWS resource status
+terraform refresh -var="aws_profile=m3"
+
+# Show current state in human-readable format
+terraform show
 ```
 
-### Resource Targeting
-
+### Targeted Operations
 ```bash
-# Plan changes for specific resources only
-terraform plan -target=aws_rds_cluster.main
+# Apply changes to specific resource only
+terraform apply -target=aws_db_cluster.aurora_cluster -var="aws_profile=m3"
 
-# Apply changes to specific resources only
-terraform apply -target=aws_s3_bucket.main -target=aws_rds_cluster.main
+# Plan changes for specific module only
+terraform plan -target=module.database -var="aws_profile=m3"
 
-# Destroy specific resources only
-terraform destroy -target=aws_bedrockagent_knowledge_base.main
+# Destroy specific resource only
+terraform destroy -target=aws_s3_bucket.documents -var="aws_profile=m3"
+
+# Apply changes to multiple specific resources
+terraform apply -target=module.ai -target=module.database -var="aws_profile=m3"
 ```
 
-### Validation & Formatting
+### Debugging and Inspection
+```bash
+# Enable detailed logging
+export TF_LOG=DEBUG
+terraform apply -var="aws_profile=m3"
+
+# Show outputs without applying
+terraform output
+
+# Show specific output value
+terraform output aurora_cluster_endpoint
+
+# Graph dependencies (requires graphviz)
+terraform graph | dot -Tpng > graph.png
+
+# Validate configuration with detailed errors
+terraform validate -json
+```
+
+### Workspace Management (Multi-Environment)
+```bash
+# List all workspaces
+terraform workspace list
+
+# Create new workspace (for different environment)
+terraform workspace new staging
+
+# Switch to workspace
+terraform workspace select production
+
+# Show current workspace
+terraform workspace show
+
+# Delete workspace
+terraform workspace delete staging
+```
+
+## 🔍 Accessing Your Infrastructure
+
+After deployment, you'll get outputs with connection details:
 
 ```bash
-# Validate configuration syntax
+# Example outputs:
+aurora_cluster_endpoint = "text2agent-dev-cluster.cluster-xyz.eu-west-2.rds.amazonaws.com"
+bedrock_knowledge_base_id = "ABC123XYZ"
+cognito_user_pool_id = "eu-west-2_AbCdEfGhI"
+s3_bucket_name = "str-data-store-bucket"
+```
+
+## Comprehensive Troubleshooting Guide
+
+### Common Terraform Errors
+
+#### 1. **Exit Code 3 (Formatting Issues)**
+```bash
+Error: Configuration formatting issues
+```
+**Fix:**
+```bash
+terraform fmt
 terraform validate
-
-# Format all .tf files consistently
-terraform fmt -recursive
-
-# Check for potential issues
-terraform plan -detailed-exitcode
 ```
 
-### Working with Variables
+#### 2. **State Lock Errors**
+```bash
+Error: Error acquiring the state lock
+```
+**Causes:**
+- Another terraform process running
+- Previous process crashed and left lock
+- Network interruption during apply
+
+**Fix:**
+```bash
+# List locks
+terraform force-unlock LOCK_ID
+
+# For S3 backend, check DynamoDB table for locks
+aws dynamodb scan --table-name terraform-state-lock --profile m3
+```
+
+#### 3. **Backend Initialization Errors**
+```bash
+Error: Failed to get existing workspaces
+```
+**Fix:**
+```bash
+# Re-initialize backend
+terraform init -reconfigure
+
+# Force initialize (overwrites local state)
+terraform init -force-copy
+```
+
+#### 4. **Provider Version Conflicts**
+```bash
+Error: Incompatible provider version
+```
+**Fix:**
+```bash
+# Upgrade providers to latest compatible versions
+terraform init -upgrade
+
+# Lock to specific versions (in versions.tf)
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+}
+```
+
+#### 5. **Resource Already Exists**
+```bash
+Error: Resource already exists
+```
+**Solutions:**
+```bash
+# Option 1: Import existing resource
+terraform import aws_s3_bucket.example existing-bucket-name
+
+# Option 2: Remove from state and let Terraform recreate
+terraform state rm aws_s3_bucket.example
+
+# Option 3: Rename resource in configuration
+resource "aws_s3_bucket" "example_new" {
+  # ... configuration
+}
+```
+
+#### 6. **AWS Permission Errors**
+```bash
+Error: AccessDenied: User: arn:aws:iam::ACCOUNT:user/USERNAME is not authorized
+```
+**Debug steps:**
+```bash
+# Check current AWS identity
+aws sts get-caller-identity --profile m3
+
+# Test specific permissions
+aws iam simulate-principal-policy \
+  --policy-source-arn arn:aws:iam::994626600571:user/your-user \
+  --action-names rds:CreateDBCluster \
+  --resource-arns "*" \
+  --profile m3
+
+# Check IAM policies attached to user/role
+aws iam list-attached-user-policies --user-name your-username --profile m3
+```
+
+### Aurora Database Issues
+
+#### **HNSW Index Creation Failures**
+```bash
+Error: executing SQL: CREATE INDEX ... USING hnsw
+```
+**Debug:**
+```bash
+# Check pgvector version
+psql -h YOUR_CLUSTER_ENDPOINT -U postgres -d str_kb -c "SELECT * FROM pg_available_extensions WHERE name = 'vector';"
+
+# Check if index exists
+psql -h YOUR_CLUSTER_ENDPOINT -U postgres -d str_kb -c "\\d bedrock_integration.bedrock_kb"
+
+# Manually create index (for testing)
+psql -h YOUR_CLUSTER_ENDPOINT -U postgres -d str_kb -c "CREATE INDEX ON bedrock_integration.bedrock_kb USING hnsw (embedding vector_cosine_ops);"
+```
+
+#### **Aurora Connection Timeouts**
+```bash
+Error: dial tcp: i/o timeout
+```
+**Causes & Fixes:**
+- **VPC Security Groups**: Check inbound rules allow port 5432
+- **Network ACLs**: Ensure subnet NACLs allow database traffic
+- **Aurora Status**: Check cluster is in 'available' state
+- **DNS Resolution**: Verify cluster endpoint resolves
 
 ```bash
-# Override variables from command line
-terraform apply -var="environment=production" -var="db_instance_count=3"
+# Test connectivity
+telnet your-cluster-endpoint.region.rds.amazonaws.com 5432
 
-# Use different variables file
+# Check security groups
+aws ec2 describe-security-groups --group-ids sg-xxxxxxxxx --profile m3
+
+# Check Aurora cluster status
+aws rds describe-db-clusters --db-cluster-identifier text2agent-dev-cluster --profile m3
+```
+
+### Bedrock Knowledge Base Issues
+
+#### **Knowledge Base Creation Fails**
+```bash
+Error: ValidationException: The knowledge base storage configuration provided is invalid
+```
+**Common causes:**
+1. **Missing HNSW index** in Aurora database
+2. **Incorrect schema permissions**
+3. **Vector column not found**
+
+**Debug steps:**
+```bash
+# Verify database schema
+psql -h ENDPOINT -U postgres -d str_kb -c "\\dt bedrock_integration.*"
+
+# Check if HNSW index exists
+psql -h ENDPOINT -U postgres -d str_kb -c "\\di bedrock_integration.*"
+
+# Test vector operations
+psql -h ENDPOINT -U postgres -d str_kb -c "SELECT embedding <=> '[1,2,3,4]'::vector FROM bedrock_integration.bedrock_kb LIMIT 1;"
+```
+
+### GitHub Actions Failures
+
+#### **AWS Authentication Errors**
+```yaml
+Error: No credentials found
+```
+**Fix in GitHub Secrets:**
+- `AWS_ACCESS_KEY_ID`: Your access key
+- `AWS_SECRET_ACCESS_KEY`: Your secret key  
+- `AWS_REGION`: `eu-west-2`
+
+#### **Shell Compatibility Issues**
+```bash
+Error: [[: not found
+```
+**Cause**: GitHub Actions uses `/bin/sh` (dash), not bash
+**Fix**: Use POSIX-compatible syntax:
+```bash
+# Instead of: [[ "$var" == *"pattern"* ]]
+# Use: echo "$var" | grep -q "pattern"
+
+# Instead of: [[ "$var" != "FAILED" ]]  
+# Use: [ "$var" != "FAILED" ]
+```
+
+### Recovery Procedures
+
+#### **Complete Infrastructure Recovery**
+If infrastructure is corrupted:
+```bash
+# 1. Backup current state
+cp terraform.tfstate terraform.tfstate.corrupted
+
+# 2. Import all existing resources
+terraform import aws_db_cluster.aurora_cluster text2agent-dev-cluster
+terraform import aws_s3_bucket.documents str-data-store-bucket
+# ... import other resources
+
+# 3. Or destroy and recreate (if no critical data)
+terraform destroy -var="aws_profile=m3"
+terraform apply -var="aws_profile=m3"
+```
+
+#### **Partial Module Recovery**
+If specific module fails:
+```bash
+# Target specific module for recreation
+terraform destroy -target=module.ai -var="aws_profile=m3"
+terraform apply -target=module.ai -var="aws_profile=m3"
+```
+
+#### **Database Recovery**
+If Aurora cluster is corrupted:
+```bash
+# 1. Create manual snapshot first
+aws rds create-db-cluster-snapshot \
+  --db-cluster-snapshot-identifier "manual-backup-$(date +%Y%m%d)" \
+  --db-cluster-identifier text2agent-dev-cluster \
+  --profile m3
+
+# 2. Then recreate with Terraform
+terraform destroy -target=module.database -var="aws_profile=m3"
+terraform apply -target=module.database -var="aws_profile=m3"
+```
+
+## Making Changes
+
+### Safe Changes (Updates in-place)
+- Adding tags to resources
+- Modifying Lambda function code
+- Updating IAM policies
+- Adding new modules
+
+### Dangerous Changes (Forces recreation)
+- Changing VPC CIDR blocks
+- Changing Aurora cluster identifier
+- Modifying database names
+
+**Always run `terraform plan` first to see what will change!**
+
+## Operational Best Practices
+
+### Development Workflow
+```bash
+# 1. Always plan first
+terraform plan -var="aws_profile=m3" -out=plan.out
+
+# 2. Review the plan carefully
+terraform show plan.out
+
+# 3. Apply the saved plan
+terraform apply plan.out
+
+# 4. Clean up plan file
+rm plan.out
+```
+
+### Production Deployment
+```bash
+# 1. Use workspaces for environment separation
+terraform workspace new production
+terraform workspace select production
+
+# 2. Use separate terraform.tfvars for each environment
 terraform apply -var-file="production.tfvars"
 
-# Set variables via environment (prefix with TF_VAR_)
-export TF_VAR_environment=staging
-terraform apply
+# 3. Enable state locking with DynamoDB
+# (already configured in backend.tf)
+
+# 4. Use versioned modules
+module "database" {
+  source = "./modules/database"
+  version = "v1.0.0"  # Pin to specific version
+}
 ```
-
-## Configuration Guide
-
-### Key Variables to Customize
-
-Edit `terraform.tfvars` to customize your deployment:
-
-```hcl
-# Basic Configuration
-aws_region = "us-west-2"
-environment = "dev"  # or "staging", "production"
-project_name = "text2agent"
-
-# Database Configuration
-db_instance_count = 2  # 1 for dev, 2+ for production
-db_instance_class = "db.r6g.large"  # or db.t4g.medium for dev
-
-# S3 Configuration
-s3_versioning_enabled = true
-```
-
-### Environment-Specific Configurations
-
-For different environments, consider:
-
-**Development (`dev`)**:
-```hcl
-environment = "dev"
-db_instance_count = 1
-db_instance_class = "db.t4g.medium"
-backup_retention_period = 1
-```
-
-**Production (`prod`)**:
-```hcl
-environment = "prod"
-db_instance_count = 3
-db_instance_class = "db.r6g.xlarge"
-backup_retention_period = 30
-```
-
-## Using the Bedrock Knowledge Base
-
-### 1. Upload Documents
-
-```bash
-# Get bucket name from Terraform output
-BUCKET_NAME=$(terraform output -raw s3_bucket_id)
-
-# Upload documents (they'll be auto-ingested)
-aws s3 cp ./document.pdf s3://$BUCKET_NAME/
-aws s3 cp ./text-file.txt s3://$BUCKET_NAME/
-aws s3 sync ./documents/ s3://$BUCKET_NAME/documents/
-```
-
-### 2. Query the Knowledge Base
-
-```python
-import boto3
-
-# Initialize Bedrock Agent Runtime client
-bedrock = boto3.client('bedrock-agent-runtime', region_name='us-west-2')
-
-# Query the knowledge base
-response = bedrock.retrieve(
-    knowledgeBaseId='YOUR_KB_ID',  # From terraform output
-    retrievalQuery={
-        'text': 'What are the main topics in the documents?'
-    },
-    retrievalConfiguration={
-        'vectorSearchConfiguration': {
-            'numberOfResults': 5
-        }
-    }
-)
-
-# Process results
-for result in response['retrievalResults']:
-    print(f"Score: {result['score']}")
-    print(f"Content: {result['content']['text']}")
-    print("---")
-```
-
-### 3. Monitor Ingestion
-
-```bash
-# Get knowledge base details
-KB_ID=$(terraform output -raw bedrock_knowledge_base_id)
-DS_ID=$(terraform output -raw bedrock_data_source_id)
-
-# Check ingestion jobs
-aws bedrock-agent list-ingestion-jobs \
-  --profile m3 \
-  --knowledge-base-id $KB_ID \
-  --data-source-id $DS_ID
-```
-
-## Database Access
-
-### Using RDS Data API (Recommended)
-
-```bash
-# Execute SQL via Data API (no VPN/bastion needed)
-aws rds-data execute-statement \
-  --profile m3 \
-  --resource-arn "$(terraform output -raw aurora_cluster_arn)" \
-  --database "postgres" \
-  --secret-arn "$(terraform output -raw db_password_secret_arn)" \
-  --sql "SELECT version();"
-```
-
-### Direct Connection (Requires VPN/Bastion)
-
-```bash
-# Get connection details
-ENDPOINT=$(terraform output -raw aurora_cluster_endpoint)
-USERNAME=$(terraform output -raw aurora_cluster_master_username)
-
-# Get password from Secrets Manager
-PASSWORD=$(aws secretsmanager get-secret-value \
-  --profile m3 \
-  --secret-id "$(terraform output -raw db_password_secret_arn)" \
-  --query SecretString --output text | jq -r '.password')
-
-# Connect with psql
-psql -h $ENDPOINT -U $USERNAME -d postgres
-```
-
-## Troubleshooting
-
-### Common Issues
-
-1. **AWS Profile Issues**
-   ```bash
-   # Verify profile configuration
-   aws sts get-caller-identity --profile m3
-   
-   # If profile doesn't exist, configure it
-   aws configure --profile m3
-   ```
-
-2. **Terraform State Lock**
-   ```bash
-   # If state is locked, force unlock (use carefully)
-   terraform force-unlock LOCK_ID
-   ```
-
-3. **Resource Already Exists**
-   ```bash
-   # Import existing resource into state
-   terraform import aws_s3_bucket.main existing-bucket-name
-   ```
-
-4. **Insufficient Permissions**
-   ```bash
-   # Check current permissions
-   aws sts get-caller-identity --profile m3
-   aws iam get-user --profile m3
-   ```
-
-### Useful Debugging Commands
-
-```bash
-# Enable verbose logging
-export TF_LOG=DEBUG
-terraform apply
-
-# Show provider configuration
-terraform providers
-
-# Validate configuration
-terraform validate
-
-# Check for syntax errors
-terraform fmt -check -recursive
-```
-
-## Cost Optimization
-
-### Development Environment
-
-```hcl
-# In terraform.tfvars for dev
-environment = "dev"
-db_instance_count = 1
-db_instance_class = "db.t4g.medium"
-backup_retention_period = 1
-```
-
-### Monitor Costs
-
-```bash
-# Check AWS costs via CLI
-aws ce get-cost-and-usage \
-  --profile m3 \
-  --time-period Start=2024-01-01,End=2024-01-31 \
-  --granularity MONTHLY \
-  --metrics BlendedCost
-```
-
-## Cleanup
-
-### Destroy Everything
-
-```bash
-# Destroy all resources (WARNING: This deletes all data)
-terraform destroy
-
-# Destroy specific resources only
-terraform destroy -target=aws_bedrockagent_knowledge_base.main
-```
-
-### Partial Cleanup
-
-```bash
-# Remove Bedrock resources only
-terraform destroy \
-  -target=aws_bedrockagent_knowledge_base.main \
-  -target=aws_bedrockagent_data_source.main \
-  -target=aws_iam_role.bedrock_knowledge_base_role \
-  -target=aws_iam_role.bedrock_data_source_role
-```
-
-## Security Best Practices
-
-1. **Never commit `terraform.tfvars`** with sensitive data
-2. **Use AWS Secrets Manager** for all passwords and keys
-3. **Enable VPC Flow Logs** for network monitoring
-4. **Regular backup verification** for RDS
-5. **Least privilege IAM policies** for all roles
-6. **Enable CloudTrail** for audit logging
-
-## Support & Maintenance
-
-### Regular Tasks
-
-1. **Update providers** monthly: `terraform init -upgrade`
-2. **Review state** for drift: `terraform plan`
-3. **Backup state file** before major changes
-4. **Monitor AWS costs** and resource usage
-5. **Review security groups** and access patterns

@@ -345,6 +345,123 @@ GitHub Actions workflow provides:
 - **Multi-Environment**: Staging and production deployments
 - **Performance Monitoring**: Test execution metrics
 
+#### Advanced Error Handling & Recovery
+
+The Terraform deployment workflow includes sophisticated error handling mechanisms to ensure reliable deployments:
+
+##### Terraform State Management
+- **Automatic State Backup**: Creates timestamped backups before and after each deployment
+- **Rollback on Failure**: Automatically restores previous state if deployment fails
+- **State Validation**: Verifies state consistency before proceeding with changes
+
+##### Error Detection & Recovery
+
+**1. Stale Plan Recovery**
+```yaml
+# Detects when Terraform plan becomes stale due to state changes
+if grep -q "Saved plan is stale" "$APPLY_OUTPUT_FILE"; then
+  echo "🔧 Plan is stale - regenerating plan and reapplying..."
+  terraform plan -out=tfplan-fresh
+  terraform apply -auto-approve tfplan-fresh
+fi
+```
+
+**2. Bedrock Resource State Inconsistencies**
+```yaml
+# Handles AWS Bedrock Knowledge Base recreation scenarios
+elif grep -q "ResourceNotFoundException.*DataSource.*is not found" "$APPLY_OUTPUT_FILE"; then
+  echo "🔧 Detected orphaned Bedrock data source - applying fix..."
+  terraform state rm module.ai.aws_bedrockagent_data_source.s3_documents
+  terraform plan -out=tfplan-fixed
+  terraform apply -auto-approve tfplan-fixed
+fi
+```
+
+**3. Comprehensive Error Logging**
+- Captures full Terraform output for analysis
+- Provides specific error patterns for different failure modes
+- Shows complete error context for unhandled cases
+
+##### Common Recovery Scenarios
+
+| Error Type | Cause | Automatic Recovery |
+|------------|-------|-------------------|
+| **Stale Plan** | State modified between plan and apply | ✅ Regenerates fresh plan |
+| **Bedrock Data Source 404** | Knowledge Base recreated, orphaned data source | ✅ Removes from state, recreates |
+| **Resource Dependencies** | Cascading resource recreation | ✅ State cleanup and replan |
+| **AWS API Throttling** | Rate limiting during deployment | ⚠️ Retry with exponential backoff |
+
+##### Rollback Protection
+
+**Automatic Rollback Triggers**:
+- Terraform apply failure after 3 retry attempts
+- Critical infrastructure resource destruction
+- Database connectivity loss during deployment
+
+**Rollback Process**:
+1. **State Restoration**: Restores pre-deployment state backup
+2. **Resource Cleanup**: Identifies and removes partially created resources
+3. **Notification**: Provides detailed failure analysis and rollback status
+4. **Manual Intervention Guidance**: Clear instructions for manual cleanup if needed
+
+##### Best Practices for Reliable Deployments
+
+**Infrastructure Changes**:
+```bash
+# For changes that might trigger resource recreation
+git commit -m "feat: update RDS configuration
+
+- Changed instance class from db.t3.micro to db.t3.small
+- Will trigger Aurora cluster recreation
+- Bedrock Knowledge Base will be automatically recreated
+- CI/CD will handle data source state cleanup"
+```
+
+**Resource Dependencies**:
+- Aurora cluster changes → Bedrock Knowledge Base recreation
+- VPC changes → Security group and subnet recreation  
+- IAM role changes → Service permission updates
+
+**Monitoring Deployment Status**:
+```bash
+# Check deployment logs in GitHub Actions
+# Look for these success indicators:
+✅ Database setup complete
+✅ All validations complete - ready for Bedrock Knowledge Base creation
+✅ Complete infrastructure deployment successful
+```
+
+##### Troubleshooting Deployment Issues
+
+**Common Issues & Solutions**:
+
+1. **"DataSource not found" Error**
+   - **Cause**: Knowledge Base was recreated but data source still references old KB
+   - **Auto-fix**: Workflow automatically removes orphaned data source from state
+   - **Manual fix**: `terraform state rm module.ai.aws_bedrockagent_data_source.s3_documents`
+
+2. **"Saved plan is stale" Error**
+   - **Cause**: Terraform state changed between plan and apply phases
+   - **Auto-fix**: Workflow automatically generates fresh plan
+   - **Manual fix**: Re-run `terraform plan` followed by `terraform apply`
+
+3. **Database Connection Timeout**
+   - **Cause**: Aurora cluster still initializing during Bedrock setup
+   - **Auto-fix**: Workflow includes 120-second stabilization wait in GitHub Actions
+   - **Manual fix**: Wait for cluster to be fully available before retry
+
+**Emergency Procedures**:
+```bash
+# If automatic rollback fails, manual state restoration:
+cd terraform/
+aws s3 cp s3://text2agent-terraform-state-eu-west-2/backups/latest-pre-apply.tfstate \
+          s3://text2agent-terraform-state-eu-west-2/text2agent/production/terraform.tfstate
+
+# Verify state restoration
+terraform state list
+terraform plan  # Should show no changes if rollback successful
+```
+
 ## 📊 Monitoring & Analytics
 
 ### Logging System
