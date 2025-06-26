@@ -159,6 +159,29 @@ jobs:
         run: |
           terraform init
 
+      - name: Backup Current State Before Planning
+        run: |
+          echo "💾 Creating backup of current Terraform state..."
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          BACKUP_KEY="backups/terraform.tfstate.${TIMESTAMP}"
+          
+          # Check if state file exists in S3
+          if aws s3api head-object --bucket text2agent-terraform-state-eu-west-2 \
+             --key text2agent/production/terraform.tfstate \
+             --region ${{ env.AWS_REGION }} 2>/dev/null; then
+            
+            echo "📁 Current state found, creating backup..."
+            aws s3 cp s3://text2agent-terraform-state-eu-west-2/text2agent/production/terraform.tfstate \
+                      s3://text2agent-terraform-state-eu-west-2/${BACKUP_KEY} \
+                      --region ${{ env.AWS_REGION }}
+            
+            echo "✅ State backed up to: s3://text2agent-terraform-state-eu-west-2/${BACKUP_KEY}"
+            echo "BACKUP_KEY=${BACKUP_KEY}" >> $GITHUB_ENV
+          else
+            echo "ℹ️ No existing state found - this appears to be initial deployment"
+            echo "BACKUP_KEY=" >> $GITHUB_ENV
+          fi
+
       - name: Terraform Plan
         run: |
           echo "🚀 Planning complete infrastructure deployment..."
@@ -240,11 +263,141 @@ jobs:
         run: |
           terraform init
 
+      - name: Backup Current State Before Apply
+        run: |
+          echo "💾 Creating backup of current Terraform state before apply..."
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          BACKUP_KEY="backups/pre-apply-terraform.tfstate.${TIMESTAMP}"
+          
+          # Check if state file exists in S3
+          if aws s3api head-object --bucket text2agent-terraform-state-eu-west-2 \
+             --key text2agent/production/terraform.tfstate \
+             --region ${{ env.AWS_REGION }} 2>/dev/null; then
+            
+            echo "📁 Current state found, creating pre-apply backup..."
+            aws s3 cp s3://text2agent-terraform-state-eu-west-2/text2agent/production/terraform.tfstate \
+                      s3://text2agent-terraform-state-eu-west-2/${BACKUP_KEY} \
+                      --region ${{ env.AWS_REGION }}
+            
+            echo "✅ Pre-apply state backed up to: s3://text2agent-terraform-state-eu-west-2/${BACKUP_KEY}"
+            echo "PRE_APPLY_BACKUP_KEY=${BACKUP_KEY}" >> $GITHUB_ENV
+            
+            # Also create a "latest-backup" for easy reference
+            aws s3 cp s3://text2agent-terraform-state-eu-west-2/text2agent/production/terraform.tfstate \
+                      s3://text2agent-terraform-state-eu-west-2/backups/latest-pre-apply.tfstate \
+                      --region ${{ env.AWS_REGION }}
+            
+            echo "📌 Latest backup also saved as: backups/latest-pre-apply.tfstate"
+          else
+            echo "ℹ️ No existing state found - this appears to be initial deployment"
+            echo "PRE_APPLY_BACKUP_KEY=" >> $GITHUB_ENV
+          fi
+
+      - name: Fix Bedrock State Inconsistencies
+        run: |
+          echo "🔍 Checking for Bedrock state inconsistencies..."
+          
+          # Check if Knowledge Base was recreated but data source still in old state
+          echo "Checking Bedrock resources in state..."
+          KB_IN_STATE=$(terraform state list | grep "aws_bedrockagent_knowledge_base" || echo "")
+          DS_IN_STATE=$(terraform state list | grep "aws_bedrockagent_data_source" || echo "")
+          
+          if [ -n "$KB_IN_STATE" ] && [ -n "$DS_IN_STATE" ]; then
+            echo "Found both Knowledge Base and Data Source in state"
+            
+            # Get KB ID from state
+            KB_ID=$(terraform state show module.ai.aws_bedrockagent_knowledge_base.main 2>/dev/null | grep "^[[:space:]]*id[[:space:]]*=" | cut -d'"' -f2 || echo "")
+            DS_ID=$(terraform state show module.ai.aws_bedrockagent_data_source.s3_documents 2>/dev/null | grep "^[[:space:]]*id[[:space:]]*=" | cut -d'"' -f2 | cut -d',' -f1 || echo "")
+            
+            echo "Knowledge Base ID in state: $KB_ID"
+            echo "Data Source ID in state: $DS_ID"
+            
+            if [ -n "$KB_ID" ] && [ -n "$DS_ID" ]; then
+              # Check if the data source actually exists in AWS for this KB
+              echo "Verifying data source exists in AWS..."
+              DS_EXISTS=$(aws bedrock-agent get-data-source \
+                --knowledge-base-id "$KB_ID" \
+                --data-source-id "$DS_ID" \
+                --region ${{ env.AWS_REGION }} \
+                --query 'dataSource.dataSourceId' \
+                --output text 2>/dev/null || echo "NOT_FOUND")
+              
+              if [ "$DS_EXISTS" = "NOT_FOUND" ]; then
+                echo "🔧 Data source $DS_ID not found in Knowledge Base $KB_ID"
+                echo "Removing orphaned data source from Terraform state..."
+                terraform state rm module.ai.aws_bedrockagent_data_source.s3_documents || echo "⚠️ Could not remove from state"
+                echo "✅ Orphaned data source removed - will be recreated during apply"
+              else
+                echo "✅ Data source exists and is correctly linked"
+              fi
+            fi
+          else
+            echo "ℹ️ No Bedrock state inconsistency detected"
+          fi
+
       - name: Terraform Apply
         run: |
           echo "🚀 Applying complete infrastructure deployment..."
-          terraform apply -auto-approve tfplan
-          echo "✅ Complete infrastructure deployment successful"
+          
+          # First attempt: Normal apply
+          if ! terraform apply -auto-approve tfplan; then
+            echo "⚠️ Initial apply failed - checking for Bedrock data source issues..."
+            
+            # Check if it's the specific Bedrock data source error
+            LAST_ERROR=$(terraform apply -auto-approve tfplan 2>&1 | tail -10 || echo "")
+            if echo "$LAST_ERROR" | grep -q "ResourceNotFoundException.*DataSource.*is not found"; then
+              echo "🔧 Detected orphaned Bedrock data source - applying fix..."
+              
+              # Remove the problematic data source from state
+              terraform state rm module.ai.aws_bedrockagent_data_source.s3_documents 2>/dev/null || echo "Could not remove from state"
+              
+              # Re-run terraform plan and apply to recreate the data source
+              echo "Re-planning after state cleanup..."
+              terraform plan -out=tfplan-fixed \
+                -var="aws_region=${{ env.AWS_REGION }}" \
+                -var="aws_profile="
+              
+              echo "Applying fixed plan..."
+              terraform apply -auto-approve tfplan-fixed
+              
+              echo "✅ Infrastructure deployed with Bedrock data source recreated"
+            else
+              echo "❌ Different error encountered - failing deployment"
+              exit 1
+            fi
+          else
+            echo "✅ Complete infrastructure deployment successful"
+          fi
+
+      - name: Post-Apply State Backup
+        if: success()
+        run: |
+          echo "💾 Creating post-apply state backup for rollback purposes..."
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          POST_APPLY_BACKUP_KEY="backups/post-apply-terraform.tfstate.${TIMESTAMP}"
+          
+          aws s3 cp s3://text2agent-terraform-state-eu-west-2/text2agent/production/terraform.tfstate \
+                    s3://text2agent-terraform-state-eu-west-2/${POST_APPLY_BACKUP_KEY} \
+                    --region ${{ env.AWS_REGION }}
+          
+          echo "✅ Post-apply state backed up to: s3://text2agent-terraform-state-eu-west-2/${POST_APPLY_BACKUP_KEY}"
+          echo "📌 Backup created after successful apply for future reference"
+
+      - name: Rollback on Failure
+        if: failure() && env.PRE_APPLY_BACKUP_KEY != ''
+        run: |
+          echo "🔥 FAILURE DETECTED - Attempting to restore previous state..."
+          echo "⚠️ This is an emergency rollback procedure"
+          echo "Restoring state from: $PRE_APPLY_BACKUP_KEY"
+          
+          # Restore the previous state
+          aws s3 cp s3://text2agent-terraform-state-eu-west-2/$PRE_APPLY_BACKUP_KEY \
+                    s3://text2agent-terraform-state-eu-west-2/text2agent/production/terraform.tfstate \
+                    --region ${{ env.AWS_REGION }}
+          
+          echo "⚠️ STATE RESTORED TO PRE-APPLY VERSION"
+          echo "⚠️ Manual intervention may still be required to clean up partially created resources"
+          echo "⚠️ Check AWS Console for orphaned resources"
 
       - name: Generate Outputs
         run: |
