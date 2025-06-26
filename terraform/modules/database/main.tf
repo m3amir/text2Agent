@@ -158,9 +158,18 @@ resource "null_resource" "db_schema_init" {
     secret_arn  = aws_secretsmanager_secret.db_credentials.arn
   }
 
-  # Wait for the database to be ready
+  # Wait for the database to be ready - longer wait for GitHub Actions
   provisioner "local-exec" {
-    command = "sleep 120"
+    command = <<-EOF
+      echo "Waiting for database to be fully ready..."
+      if [ "$GITHUB_ACTIONS" = "true" ]; then
+        echo "Running in GitHub Actions - using extended wait time"
+        sleep 300  # 5 minutes for GitHub Actions
+      else
+        echo "Running locally - using standard wait time"
+        sleep 120  # 2 minutes for local
+      fi
+    EOF
   }
 
   # Initialize TWO separate databases using AWS CLI and RDS Data API
@@ -207,11 +216,21 @@ resource "null_resource" "db_schema_init" {
         );' \
         --region ${var.aws_region}
 
+      # Create the HNSW index for vector similarity search (required by Bedrock)
       aws rds-data execute-statement \
         --resource-arn "${aws_rds_cluster.main.arn}" \
         --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
         --database "${aws_rds_cluster.main.database_name}" \
         --sql 'CREATE INDEX IF NOT EXISTS idx_bedrock_kb_embedding ON bedrock_integration.bedrock_kb USING hnsw (embedding vector_cosine_ops);' \
+        --region ${var.aws_region}
+
+      # Verify the index was created successfully
+      echo "Verifying HNSW index creation..."
+      aws rds-data execute-statement \
+        --resource-arn "${aws_rds_cluster.main.arn}" \
+        --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
+        --database "${aws_rds_cluster.main.database_name}" \
+        --sql "SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'bedrock_kb' AND schemaname = 'bedrock_integration' AND indexdef LIKE '%hnsw%';" \
         --region ${var.aws_region}
 
       aws rds-data execute-statement \
@@ -346,6 +365,25 @@ resource "null_resource" "db_schema_init" {
       echo "✅ Database setup complete!"
       echo "✅ str_kb database: Bedrock Knowledge Base with vector support"
       echo "✅ text2AgentTenants database: Multi-tenant user management"
+
+      # Final validation - ensure table and index exist and are ready
+      echo "🔍 Final validation: Checking table and index existence..."
+      aws rds-data execute-statement \
+        --resource-arn "${aws_rds_cluster.main.arn}" \
+        --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
+        --database "${aws_rds_cluster.main.database_name}" \
+        --sql "SELECT table_name, column_name, data_type FROM information_schema.columns WHERE table_schema = 'bedrock_integration' AND table_name = 'bedrock_kb' AND column_name = 'embedding';" \
+        --region ${var.aws_region}
+
+      echo "🔍 Verifying HNSW index is accessible..."
+      aws rds-data execute-statement \
+        --resource-arn "${aws_rds_cluster.main.arn}" \
+        --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
+        --database "${aws_rds_cluster.main.database_name}" \
+        --sql "SELECT COUNT(*) as index_count FROM pg_indexes WHERE tablename = 'bedrock_kb' AND schemaname = 'bedrock_integration' AND indexdef LIKE '%hnsw%';" \
+        --region ${var.aws_region}
+
+      echo "✅ All validations complete - ready for Bedrock Knowledge Base creation!"
     EOF
   }
 
