@@ -120,6 +120,9 @@ module "database" {
   vpc_cidr_block     = module.networking.vpc_cidr_block
   private_subnet_ids = module.networking.private_subnet_ids
   public_subnet_ids  = module.networking.public_subnet_ids
+  
+  # Optional: Override the default cluster identifier
+  # cluster_identifier = "your-custom-cluster-name"
 }
 
 # ==============================================================================

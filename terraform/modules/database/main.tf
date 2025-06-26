@@ -71,7 +71,7 @@ resource "aws_iam_role_policy_attachment" "rds_enhanced_monitoring" {
 
 # Main Application RDS Aurora Cluster
 resource "aws_rds_cluster" "main" {
-  cluster_identifier = "str-kb"
+  cluster_identifier = var.cluster_identifier != null ? var.cluster_identifier : "text2agent-${var.environment}-cluster"
   engine             = "aurora-postgresql"
   engine_version     = "16.6"
   engine_mode        = "provisioned"

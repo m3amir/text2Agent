@@ -32,4 +32,10 @@ variable "public_subnet_ids" {
 variable "vpc_cidr_block" {
   description = "VPC CIDR block for security group rules"
   type        = string
+}
+
+variable "cluster_identifier" {
+  description = "Identifier for the Aurora cluster"
+  type        = string
+  default     = null
 } 
