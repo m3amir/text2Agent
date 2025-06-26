@@ -40,7 +40,7 @@ provider "aws" {
   region                   = var.aws_region
   profile                  = var.aws_profile != "" ? var.aws_profile : null
   shared_credentials_files = var.aws_profile != "" ? ["~/.aws/credentials"] : null
-  
+
   default_tags {
     tags = {
       Project     = var.project_name
