@@ -25,6 +25,7 @@ terraform {
       source  = "hashicorp/null"
       version = "~> 3.0"
     }
+
   }
 }
 

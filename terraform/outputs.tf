@@ -1,88 +1,184 @@
 # =====================================================
-# ROOT OUTPUTS - Expose module outputs
+# INFRASTRUCTURE OUTPUTS
+# Complete text2Agent infrastructure outputs
 # =====================================================
 
-# Storage Module Outputs
+# VPC and Networking Outputs
+output "vpc_id" {
+  description = "ID of the VPC"
+  value       = aws_vpc.main.id
+}
+
+output "vpc_cidr_block" {
+  description = "CIDR block of the VPC"
+  value       = aws_vpc.main.cidr_block
+}
+
+output "private_subnet_ids" {
+  description = "IDs of the private subnets"
+  value       = aws_subnet.private[*].id
+}
+
+# Aurora Database Outputs
+output "aurora_cluster_id" {
+  description = "Aurora cluster identifier"
+  value       = aws_rds_cluster.aurora.cluster_identifier
+}
+
+output "aurora_cluster_arn" {
+  description = "Aurora cluster ARN"
+  value       = aws_rds_cluster.aurora.arn
+}
+
+output "aurora_cluster_endpoint" {
+  description = "Aurora cluster endpoint"
+  value       = aws_rds_cluster.aurora.endpoint
+}
+
+output "aurora_instance_id" {
+  description = "Aurora instance identifier"
+  value       = aws_rds_cluster_instance.aurora.identifier
+}
+
+output "aurora_instance_endpoint" {
+  description = "Aurora instance endpoint"
+  value       = aws_rds_cluster_instance.aurora.endpoint
+}
+
+output "aurora_database_name" {
+  description = "Aurora database name"
+  value       = aws_rds_cluster.aurora.database_name
+}
+
+# S3 Storage Outputs
 output "s3_bucket_name" {
-  description = "Name of the S3 bucket"
-  value       = module.storage.s3_bucket_name
+  description = "Name of the S3 bucket for documents"
+  value       = aws_s3_bucket.documents.bucket
 }
 
 output "s3_bucket_arn" {
-  description = "ARN of the S3 bucket"
-  value       = module.storage.s3_bucket_arn
+  description = "ARN of the S3 bucket for documents"
+  value       = aws_s3_bucket.documents.arn
 }
 
-output "s3_bucket_domain_name" {
-  description = "Domain name of the S3 bucket"
-  value       = module.storage.s3_bucket_domain_name
+output "s3_bucket_region" {
+  description = "Region of the S3 bucket"
+  value       = aws_s3_bucket.documents.region
 }
 
-# Authentication Module Outputs
+# Bedrock Knowledge Base Outputs
+output "bedrock_knowledge_base_id" {
+  description = "Bedrock Knowledge Base ID"
+  value       = aws_bedrockagent_knowledge_base.main.id
+}
+
+output "bedrock_knowledge_base_arn" {
+  description = "Bedrock Knowledge Base ARN"
+  value       = aws_bedrockagent_knowledge_base.main.arn
+}
+
+output "bedrock_knowledge_base_name" {
+  description = "Bedrock Knowledge Base name"
+  value       = aws_bedrockagent_knowledge_base.main.name
+}
+
+output "bedrock_data_source_id" {
+  description = "Bedrock S3 Data Source ID"
+  value       = aws_bedrockagent_data_source.s3.data_source_id
+}
+
+# Cognito Authentication Outputs
 output "cognito_user_pool_id" {
-  description = "ID of the Cognito User Pool"
+  description = "Cognito User Pool ID"
   value       = module.auth.cognito_user_pool_id
 }
 
 output "cognito_user_pool_arn" {
-  description = "ARN of the Cognito User Pool"
+  description = "Cognito User Pool ARN"
   value       = module.auth.cognito_user_pool_arn
 }
 
 output "cognito_user_pool_client_id" {
-  description = "ID of the Cognito User Pool Client"
+  description = "Cognito User Pool Client ID"
   value       = module.auth.cognito_user_pool_client_id
 }
 
 output "cognito_user_pool_domain" {
-  description = "Domain of the Cognito User Pool"
+  description = "Cognito User Pool Domain"
   value       = module.auth.cognito_user_pool_domain
 }
 
+output "cognito_user_pool_endpoint" {
+  description = "Cognito User Pool Endpoint"
+  value       = module.auth.cognito_user_pool_endpoint
+}
+
+# Lambda Function Outputs
 output "post_confirmation_lambda_name" {
-  description = "Name of the post confirmation Lambda function"
+  description = "Post Confirmation Lambda function name"
   value       = module.auth.post_confirmation_lambda_name
 }
 
 output "post_confirmation_lambda_arn" {
-  description = "ARN of the post confirmation Lambda function"
+  description = "Post Confirmation Lambda function ARN"
   value       = module.auth.post_confirmation_lambda_arn
 }
 
 output "lambda_role_arn" {
-  description = "ARN of the Lambda execution role"
+  description = "Lambda execution role ARN"
   value       = module.auth.lambda_role_arn
 }
 
-# Database Module Outputs
-output "database_endpoint" {
-  description = "RDS Aurora cluster endpoint"
-  value       = module.database.cluster_endpoint
+output "lambda_role_name" {
+  description = "Lambda execution role name"
+  value       = module.auth.lambda_role_name
 }
 
-output "database_name" {
-  description = "Name of the database"
-  value       = module.database.database_name
+# IAM Outputs
+output "bedrock_kb_role_arn" {
+  description = "Bedrock Knowledge Base IAM role ARN"
+  value       = aws_iam_role.bedrock_kb_role.arn
 }
 
-output "database_secret_name" {
-  description = "Name of the Secrets Manager secret containing database credentials"
-  value       = module.database.secret_name
+# Security Groups Outputs
+output "aurora_security_group_id" {
+  description = "Aurora security group ID"
+  value       = aws_security_group.aurora.id
 }
 
-# Deployment Information
-output "deployment_info" {
-  description = "Information about the current deployment"
+output "lambda_security_group_id" {
+  description = "Lambda security group ID"
+  value       = module.auth.lambda_security_group_id
+}
+
+# Project Information
+output "project_name" {
+  description = "Project name"
+  value       = var.project_name
+}
+
+output "environment" {
+  description = "Environment name"
+  value       = var.environment
+}
+
+output "aws_region" {
+  description = "AWS region"
+  value       = var.aws_region
+}
+
+# Infrastructure Summary
+output "infrastructure_summary" {
+  description = "Summary of deployed infrastructure"
   value = {
-    mode             = "MODULAR - Lambda + Cognito + S3"
-    environment      = var.environment
-    project          = var.project_name
-    region           = var.aws_region
-    lambda_count     = 1
-    cognito_enabled  = true
-    s3_enabled       = true
-    triggers_enabled = true
-    modules_active   = ["storage", "auth", "database"]
-    modules_disabled = ["networking", "security", "ai"]
+    vpc_id                    = aws_vpc.main.id
+    aurora_cluster           = aws_rds_cluster.aurora.cluster_identifier
+    aurora_instance          = aws_rds_cluster_instance.aurora.identifier
+    s3_bucket                = aws_s3_bucket.documents.bucket
+    bedrock_knowledge_base   = aws_bedrockagent_knowledge_base.main.name
+    cognito_user_pool        = module.auth.cognito_user_pool_id
+    lambda_function          = module.auth.post_confirmation_lambda_name
+    bedrock_kb_id            = aws_bedrockagent_knowledge_base.main.id
+    bedrock_data_source_id   = aws_bedrockagent_data_source.s3.data_source_id
   }
 } 

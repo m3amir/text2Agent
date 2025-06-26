@@ -23,4 +23,19 @@ variable "database_host" {
   description = "Database host endpoint for RDS connection"
   type        = string
   default     = ""
+}
+
+variable "vpc_id" {
+  description = "VPC ID where Lambda will be deployed"
+  type        = string
+}
+
+variable "private_subnet_ids" {
+  description = "Private subnet IDs for Lambda"
+  type        = list(string)
+}
+
+variable "rds_security_group_id" {
+  description = "Security group ID of the RDS instance"
+  type        = string
 } 

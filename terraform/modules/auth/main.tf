@@ -1,15 +1,5 @@
 # Random string for unique Cognito domain
-# Data sources for VPC configuration
-data "aws_vpc" "default" {
-  default = true
-}
-
-data "aws_subnets" "default" {
-  filter {
-    name   = "vpc-id"
-    values = [data.aws_vpc.default.id]
-  }
-}
+# VPC configuration passed from main module
 
 resource "random_string" "cognito_domain_suffix" {
   length  = 8
@@ -123,27 +113,21 @@ resource "aws_iam_role_policy" "lambda_secrets_policy" {
 
 # Lambda Layer for psycopg2 (PostgreSQL adapter)
 resource "aws_lambda_layer_version" "psycopg2_layer" {
-  filename         = "psycopg2-layer.zip"
-  layer_name       = "${var.project_name}-${var.environment}-psycopg2-layer"
-  description      = "psycopg2 library for PostgreSQL connectivity - Python 3.11 Linux compatible v2.9.9"
-  source_code_hash = filebase64sha256("psycopg2-layer.zip")
+  filename                = "psycopg2-layer.zip"
+  layer_name              = "${var.project_name}-${var.environment}-psycopg2-layer"
+  description             = "psycopg2 library for PostgreSQL connectivity - Python 3.11 ARM64 Linux compatible v2.9.9"
+  compatible_architectures = ["arm64"]
+  source_code_hash        = filebase64sha256("psycopg2-layer.zip")
 
   compatible_runtimes = ["python3.11", "python3.12"]
 }
 
-# Data source for RDS security group
-data "aws_security_group" "rds_sg" {
-  filter {
-    name   = "group-name"
-    values = ["${var.project_name}-${var.environment}-rds-*"]
-  }
-  vpc_id = data.aws_vpc.default.id
-}
+# RDS security group ID passed from main module
 
 # Lambda Security Group for VPC access
 resource "aws_security_group" "lambda_sg" {
   name_prefix = "${var.project_name}-${var.environment}-lambda-"
-  vpc_id      = data.aws_vpc.default.id
+  vpc_id      = var.vpc_id
 
   egress {
     from_port   = 0
@@ -164,7 +148,7 @@ resource "aws_security_group_rule" "lambda_to_rds" {
   to_port                  = 5432
   protocol                 = "tcp"
   source_security_group_id = aws_security_group.lambda_sg.id
-  security_group_id        = data.aws_security_group.rds_sg.id
+  security_group_id        = var.rds_security_group_id
   description              = "Allow Lambda access to RDS PostgreSQL"
 }
 
@@ -176,6 +160,7 @@ resource "aws_lambda_function" "post_confirmation" {
   handler          = "index.lambda_handler"
   runtime          = "python3.11"
   timeout          = 120
+  architectures    = ["arm64"]
   description      = "PostConfirmation trigger with Linux-compatible psycopg2 layer"
   source_code_hash = filebase64sha256(var.lambda_zip_path)
 
@@ -184,7 +169,7 @@ resource "aws_lambda_function" "post_confirmation" {
 
   # VPC Configuration for RDS access
   vpc_config {
-    subnet_ids         = data.aws_subnets.default.ids
+    subnet_ids         = var.private_subnet_ids
     security_group_ids = [aws_security_group.lambda_sg.id]
   }
 

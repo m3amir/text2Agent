@@ -1,14 +1,5 @@
-# Get default VPC and subnets for simplified deployment
-data "aws_vpc" "default" {
-  default = true
-}
-
-data "aws_subnets" "default" {
-  filter {
-    name   = "vpc-id"
-    values = [data.aws_vpc.default.id]
-  }
-}
+# VPC and subnet configuration passed from networking module
+# These will be provided via variables
 
 # Random password for database
 resource "random_password" "db_password" {
@@ -17,10 +8,10 @@ resource "random_password" "db_password" {
   override_special = "!#$%&*()-_=+[]{}<>:?"
 }
 
-# DB Subnet Group using default subnets
+# DB Subnet Group - use public subnets for dev (external access), private for prod
 resource "aws_db_subnet_group" "main" {
   name       = "${var.project_name}-${var.environment}-db-subnet-group"
-  subnet_ids = data.aws_subnets.default.ids
+  subnet_ids = var.environment == "dev" && length(var.public_subnet_ids) > 0 ? var.public_subnet_ids : var.private_subnet_ids
 
   tags = {
     Name = "${var.project_name}-${var.environment}-db-subnet-group"
@@ -30,13 +21,13 @@ resource "aws_db_subnet_group" "main" {
 # RDS Security Group
 resource "aws_security_group" "rds" {
   name_prefix = "${var.project_name}-${var.environment}-rds-"
-  vpc_id      = data.aws_vpc.default.id
+  vpc_id      = var.vpc_id
 
   ingress {
     from_port   = 5432
     to_port     = 5432
     protocol    = "tcp"
-    cidr_blocks = [data.aws_vpc.default.cidr_block]
+    cidr_blocks = [var.vpc_cidr_block]
   }
 
   egress {
@@ -90,6 +81,8 @@ resource "aws_rds_cluster" "main" {
 
   db_subnet_group_name   = aws_db_subnet_group.main.name
   vpc_security_group_ids = [aws_security_group.rds.id]
+
+  # Note: publicly_accessible is not supported for Aurora clusters - use manage_master_user_password instead
 
   backup_retention_period      = var.environment == "prod" ? 30 : 7
   preferred_backup_window      = "03:00-04:00"
@@ -173,6 +166,54 @@ resource "null_resource" "db_schema_init" {
   # Initialize database schema using AWS CLI and RDS Data API
   provisioner "local-exec" {
     command = <<-EOF
+      # Execute Bedrock schema initialization step by step
+      aws rds-data execute-statement \
+        --resource-arn "${aws_rds_cluster.main.arn}" \
+        --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
+        --database "${aws_rds_cluster.main.database_name}" \
+        --sql 'CREATE EXTENSION IF NOT EXISTS vector;' \
+        --region ${var.aws_region}
+
+      aws rds-data execute-statement \
+        --resource-arn "${aws_rds_cluster.main.arn}" \
+        --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
+        --database "${aws_rds_cluster.main.database_name}" \
+        --sql 'CREATE SCHEMA IF NOT EXISTS bedrock_integration;' \
+        --region ${var.aws_region}
+
+      aws rds-data execute-statement \
+        --resource-arn "${aws_rds_cluster.main.arn}" \
+        --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
+        --database "${aws_rds_cluster.main.database_name}" \
+        --sql 'CREATE TABLE IF NOT EXISTS bedrock_integration.bedrock_kb (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          chunks TEXT NOT NULL,
+          embedding vector(1024),
+          metadata JSONB
+        );' \
+        --region ${var.aws_region}
+
+      aws rds-data execute-statement \
+        --resource-arn "${aws_rds_cluster.main.arn}" \
+        --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
+        --database "${aws_rds_cluster.main.database_name}" \
+        --sql 'CREATE INDEX IF NOT EXISTS idx_bedrock_kb_embedding ON bedrock_integration.bedrock_kb USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);' \
+        --region ${var.aws_region}
+
+      aws rds-data execute-statement \
+        --resource-arn "${aws_rds_cluster.main.arn}" \
+        --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
+        --database "${aws_rds_cluster.main.database_name}" \
+        --sql 'CREATE INDEX IF NOT EXISTS idx_bedrock_kb_metadata ON bedrock_integration.bedrock_kb USING gin (metadata);' \
+        --region ${var.aws_region}
+
+      aws rds-data execute-statement \
+        --resource-arn "${aws_rds_cluster.main.arn}" \
+        --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
+        --database "${aws_rds_cluster.main.database_name}" \
+        --sql 'CREATE INDEX IF NOT EXISTS idx_bedrock_kb_chunks_gin ON bedrock_integration.bedrock_kb USING gin (to_tsvector('\''simple'\'', chunks));' \
+        --region ${var.aws_region}
+
       # Create Tenants schema
       aws rds-data execute-statement \
         --resource-arn "${aws_rds_cluster.main.arn}" \

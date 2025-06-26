@@ -11,6 +11,16 @@ output "cluster_identifier" {
   value       = aws_rds_cluster.main.cluster_identifier
 }
 
+output "cluster_arn" {
+  description = "RDS Aurora cluster ARN"
+  value       = aws_rds_cluster.main.arn
+}
+
+output "schema_initialization_id" {
+  description = "Database schema initialization completion ID"
+  value       = null_resource.db_schema_init.id
+}
+
 output "database_name" {
   description = "Name of the database"
   value       = aws_rds_cluster.main.database_name
@@ -35,4 +45,9 @@ output "secret_arn" {
 output "secret_name" {
   description = "Name of the Secrets Manager secret containing database credentials"
   value       = aws_secretsmanager_secret.db_credentials.name
+}
+
+output "rds_security_group_id" {
+  description = "ID of the RDS security group"
+  value       = aws_security_group.rds.id
 } 
