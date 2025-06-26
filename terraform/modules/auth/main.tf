@@ -113,11 +113,12 @@ resource "aws_iam_role_policy" "lambda_secrets_policy" {
 
 # Lambda Layer for psycopg2 (PostgreSQL adapter)
 resource "aws_lambda_layer_version" "psycopg2_layer" {
-  filename                 = "psycopg2-layer.zip"
+  count                    = fileexists(var.psycopg2_layer_zip_path) ? 1 : 0
+  filename                 = var.psycopg2_layer_zip_path
   layer_name               = "${var.project_name}-${var.environment}-psycopg2-layer"
   description              = "psycopg2 library for PostgreSQL connectivity - Python 3.11 ARM64 Linux compatible v2.9.9"
   compatible_architectures = ["arm64"]
-  source_code_hash         = filebase64sha256("psycopg2-layer.zip")
+  source_code_hash         = filebase64sha256(var.psycopg2_layer_zip_path)
 
   compatible_runtimes = ["python3.11", "python3.12"]
 }
@@ -164,8 +165,8 @@ resource "aws_lambda_function" "post_confirmation" {
   description      = "PostConfirmation trigger with Linux-compatible psycopg2 layer"
   source_code_hash = filebase64sha256(var.lambda_zip_path)
 
-  # Add the psycopg2 layer
-  layers = [aws_lambda_layer_version.psycopg2_layer.arn]
+  # Add the psycopg2 layer (only if it exists)
+  layers = length(aws_lambda_layer_version.psycopg2_layer) > 0 ? [aws_lambda_layer_version.psycopg2_layer[0].arn] : []
 
   # VPC Configuration for RDS access
   vpc_config {

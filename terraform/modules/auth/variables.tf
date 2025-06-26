@@ -19,6 +19,12 @@ variable "lambda_zip_path" {
   default     = "./post_confirmation.zip"
 }
 
+variable "psycopg2_layer_zip_path" {
+  description = "Path to the psycopg2 layer zip file"
+  type        = string
+  default     = "./psycopg2-layer.zip"
+}
+
 variable "database_host" {
   description = "Database host endpoint for RDS connection"
   type        = string
