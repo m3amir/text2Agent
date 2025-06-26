@@ -22,8 +22,13 @@ output "schema_initialization_id" {
 }
 
 output "database_name" {
-  description = "Name of the database"
+  description = "Name of the primary database (str_kb)"
   value       = aws_rds_cluster.main.database_name
+}
+
+output "tenants_database_name" {
+  description = "Name of the tenants database"
+  value       = "text2AgentTenants"
 }
 
 output "master_username" {

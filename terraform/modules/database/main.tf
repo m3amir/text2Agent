@@ -71,11 +71,11 @@ resource "aws_iam_role_policy_attachment" "rds_enhanced_monitoring" {
 
 # Main Application RDS Aurora Cluster
 resource "aws_rds_cluster" "main" {
-  cluster_identifier = "${var.project_name}-${var.environment}-main"
+  cluster_identifier = "str-kb"
   engine             = "aurora-postgresql"
   engine_version     = "16.6"
   engine_mode        = "provisioned"
-  database_name      = "postgres"
+  database_name      = "str_kb"
   master_username    = "postgres"
   master_password    = random_password.db_password.result
 
@@ -163,10 +163,24 @@ resource "null_resource" "db_schema_init" {
     command = "sleep 120"
   }
 
-  # Initialize database schema using AWS CLI and RDS Data API
+  # Initialize TWO separate databases using AWS CLI and RDS Data API
   provisioner "local-exec" {
     command = <<-EOF
-      # Execute Bedrock schema initialization step by step
+      # =================================================================
+      # STEP 1: Create the second database (text2AgentTenants)
+      # =================================================================
+      echo "Creating text2AgentTenants database..."
+      aws rds-data execute-statement \
+        --resource-arn "${aws_rds_cluster.main.arn}" \
+        --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
+        --database "${aws_rds_cluster.main.database_name}" \
+        --sql 'CREATE DATABASE "text2AgentTenants";' \
+        --region ${var.aws_region}
+
+      # =================================================================
+      # STEP 2: Initialize str_kb database (Bedrock Knowledge Base)
+      # =================================================================
+      echo "Setting up str_kb database for Bedrock..."
       aws rds-data execute-statement \
         --resource-arn "${aws_rds_cluster.main.arn}" \
         --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
@@ -214,22 +228,27 @@ resource "null_resource" "db_schema_init" {
         --sql 'CREATE INDEX IF NOT EXISTS idx_bedrock_kb_chunks_gin ON bedrock_integration.bedrock_kb USING gin (to_tsvector('\''simple'\'', chunks));' \
         --region ${var.aws_region}
 
-      # Create Tenants schema
+      # =================================================================
+      # STEP 3: Initialize text2AgentTenants database (Tenant Management)
+      # =================================================================
+      echo "Setting up text2AgentTenants database for tenant management..."
+      
+      # Enable UUID extension in text2AgentTenants database
       aws rds-data execute-statement \
         --resource-arn "${aws_rds_cluster.main.arn}" \
         --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
-        --database "${aws_rds_cluster.main.database_name}" \
-        --sql 'CREATE SCHEMA IF NOT EXISTS "Tenants";' \
+        --database "text2AgentTenants" \
+        --sql 'CREATE EXTENSION IF NOT EXISTS "uuid-ossp";' \
         --region ${var.aws_region}
 
-      # Create tenantmappings table
+      # Create tenantmappings table in text2AgentTenants database
       aws rds-data execute-statement \
         --resource-arn "${aws_rds_cluster.main.arn}" \
         --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
-        --database "${aws_rds_cluster.main.database_name}" \
-        --sql 'CREATE TABLE IF NOT EXISTS "Tenants"."tenantmappings" (
+        --database "text2AgentTenants" \
+        --sql 'CREATE TABLE IF NOT EXISTS tenantmappings (
           id SERIAL PRIMARY KEY,
-          tenant_id UUID NOT NULL UNIQUE,
+          tenant_id UUID NOT NULL UNIQUE DEFAULT uuid_generate_v4(),
           domain VARCHAR(255) NOT NULL,
           bucket_name VARCHAR(255) NOT NULL,
           created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -239,83 +258,94 @@ resource "null_resource" "db_schema_init" {
         );' \
         --region ${var.aws_region}
 
-      # Create users table
+      # Create users table in text2AgentTenants database
       aws rds-data execute-statement \
         --resource-arn "${aws_rds_cluster.main.arn}" \
         --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
-        --database "${aws_rds_cluster.main.database_name}" \
-        --sql 'CREATE TABLE IF NOT EXISTS "Tenants"."users" (
+        --database "text2AgentTenants" \
+        --sql 'CREATE TABLE IF NOT EXISTS users (
           id SERIAL PRIMARY KEY,
-          user_id UUID NOT NULL UNIQUE,
+          user_id UUID NOT NULL UNIQUE DEFAULT uuid_generate_v4(),
           email VARCHAR(255) NOT NULL UNIQUE,
           name VARCHAR(255) NOT NULL,
           tenant_id UUID NOT NULL,
           cognito_sub VARCHAR(255) UNIQUE,
           created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-          CONSTRAINT fk_tenant FOREIGN KEY (tenant_id) REFERENCES "Tenants"."tenantmappings" (tenant_id) ON DELETE CASCADE
+          CONSTRAINT fk_tenant FOREIGN KEY (tenant_id) REFERENCES tenantmappings (tenant_id) ON DELETE CASCADE
         );' \
         --region ${var.aws_region}
 
-      # Create indexes
+      # Create indexes for text2AgentTenants database
       aws rds-data execute-statement \
         --resource-arn "${aws_rds_cluster.main.arn}" \
         --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
-        --database "${aws_rds_cluster.main.database_name}" \
-        --sql 'CREATE INDEX IF NOT EXISTS idx_tenantmappings_domain ON "Tenants"."tenantmappings" (domain);' \
+        --database "text2AgentTenants" \
+        --sql 'CREATE INDEX IF NOT EXISTS idx_tenantmappings_domain ON tenantmappings (domain);' \
         --region ${var.aws_region}
 
       aws rds-data execute-statement \
         --resource-arn "${aws_rds_cluster.main.arn}" \
         --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
-        --database "${aws_rds_cluster.main.database_name}" \
-        --sql 'CREATE INDEX IF NOT EXISTS idx_users_email ON "Tenants"."users" (email);' \
+        --database "text2AgentTenants" \
+        --sql 'CREATE INDEX IF NOT EXISTS idx_users_email ON users (email);' \
         --region ${var.aws_region}
 
       aws rds-data execute-statement \
         --resource-arn "${aws_rds_cluster.main.arn}" \
         --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
-        --database "${aws_rds_cluster.main.database_name}" \
-        --sql 'CREATE INDEX IF NOT EXISTS idx_users_tenant_id ON "Tenants"."users" (tenant_id);' \
+        --database "text2AgentTenants" \
+        --sql 'CREATE INDEX IF NOT EXISTS idx_users_tenant_id ON users (tenant_id);' \
         --region ${var.aws_region}
 
-      # Create update trigger function
       aws rds-data execute-statement \
         --resource-arn "${aws_rds_cluster.main.arn}" \
         --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
-        --database "${aws_rds_cluster.main.database_name}" \
+        --database "text2AgentTenants" \
+        --sql 'CREATE INDEX IF NOT EXISTS idx_users_cognito_sub ON users (cognito_sub);' \
+        --region ${var.aws_region}
+
+      # Create update trigger function in text2AgentTenants database
+      aws rds-data execute-statement \
+        --resource-arn "${aws_rds_cluster.main.arn}" \
+        --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
+        --database "text2AgentTenants" \
         --sql 'CREATE OR REPLACE FUNCTION update_updated_at_column() RETURNS TRIGGER AS $$ BEGIN NEW.updated_at = CURRENT_TIMESTAMP; RETURN NEW; END; $$ language '"'"'plpgsql'"'"';' \
         --region ${var.aws_region}
 
-      # Drop existing triggers (ignore errors)
+      # Drop existing triggers in text2AgentTenants database (ignore errors)
       aws rds-data execute-statement \
         --resource-arn "${aws_rds_cluster.main.arn}" \
         --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
-        --database "${aws_rds_cluster.main.database_name}" \
-        --sql 'DROP TRIGGER IF EXISTS update_tenantmappings_updated_at ON "Tenants"."tenantmappings";' \
+        --database "text2AgentTenants" \
+        --sql 'DROP TRIGGER IF EXISTS update_tenantmappings_updated_at ON tenantmappings;' \
         --region ${var.aws_region} || true
 
       aws rds-data execute-statement \
         --resource-arn "${aws_rds_cluster.main.arn}" \
         --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
-        --database "${aws_rds_cluster.main.database_name}" \
-        --sql 'DROP TRIGGER IF EXISTS update_users_updated_at ON "Tenants"."users";' \
+        --database "text2AgentTenants" \
+        --sql 'DROP TRIGGER IF EXISTS update_users_updated_at ON users;' \
         --region ${var.aws_region} || true
 
-      # Create triggers
+      # Create triggers in text2AgentTenants database
       aws rds-data execute-statement \
         --resource-arn "${aws_rds_cluster.main.arn}" \
         --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
-        --database "${aws_rds_cluster.main.database_name}" \
-        --sql 'CREATE TRIGGER update_tenantmappings_updated_at BEFORE UPDATE ON "Tenants"."tenantmappings" FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();' \
+        --database "text2AgentTenants" \
+        --sql 'CREATE TRIGGER update_tenantmappings_updated_at BEFORE UPDATE ON tenantmappings FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();' \
         --region ${var.aws_region}
 
       aws rds-data execute-statement \
         --resource-arn "${aws_rds_cluster.main.arn}" \
         --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
-        --database "${aws_rds_cluster.main.database_name}" \
-        --sql 'CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON "Tenants"."users" FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();' \
+        --database "text2AgentTenants" \
+        --sql 'CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();' \
         --region ${var.aws_region}
+
+      echo "✅ Database setup complete!"
+      echo "✅ str_kb database: Bedrock Knowledge Base with vector support"
+      echo "✅ text2AgentTenants database: Multi-tenant user management"
     EOF
   }
 

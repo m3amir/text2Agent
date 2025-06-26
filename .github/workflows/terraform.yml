@@ -161,17 +161,10 @@ jobs:
 
       - name: Terraform Plan
         run: |
-          echo "🧪 Testing RDS database deployment only..."
+          echo "🚀 Planning complete infrastructure deployment..."
           terraform plan -out=tfplan \
             -var="aws_region=${{ env.AWS_REGION }}" \
-            -var="aws_profile=" \
-            -target=aws_vpc.main \
-            -target=aws_subnet.private \
-            -target=aws_db_subnet_group.main \
-            -target=aws_security_group.aurora \
-            -target=aws_rds_cluster.aurora \
-            -target=aws_rds_cluster_instance.aurora \
-            -target=null_resource.init_database
+            -var="aws_profile="
           terraform show -no-color tfplan > plan-output.txt
 
       - name: Upload Plan
@@ -249,34 +242,47 @@ jobs:
 
       - name: Terraform Apply
         run: |
-          echo "🧪 Applying RDS database deployment only..."
+          echo "🚀 Applying complete infrastructure deployment..."
           terraform apply -auto-approve tfplan
-          echo "✅ RDS database deployment completed successfully"
+          echo "✅ Complete infrastructure deployment successful"
 
       - name: Generate Outputs
         run: |
           terraform output -json > infrastructure-outputs.json
-          echo "## 🧪 RDS Database Test Deployment! 🎉" >> $GITHUB_STEP_SUMMARY
+          echo "## 🚀 COMPLETE text2Agent Infrastructure Deployed! 🎉" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 🗄️ **RDS COMPONENTS DEPLOYED**:" >> $GITHUB_STEP_SUMMARY
-          echo "- **🌐 VPC & Networking**: VPC, private subnets, security groups" >> $GITHUB_STEP_SUMMARY
+          echo "### 🏗️ **FULL STACK DEPLOYED**:" >> $GITHUB_STEP_SUMMARY
+          echo "- **🌐 VPC & Networking**: Private subnets, security groups" >> $GITHUB_STEP_SUMMARY
           echo "- **🗄️ Aurora PostgreSQL**: Cluster with serverless v2 scaling" >> $GITHUB_STEP_SUMMARY
-          echo "- **📋 Database Initialization**: pgvector extension, schema, tables, indexes" >> $GITHUB_STEP_SUMMARY
+          echo "- **🔐 Cognito Authentication**: User pool, client, domain" >> $GITHUB_STEP_SUMMARY
+          echo "- **⚡ Lambda Functions**: Post-confirmation triggers" >> $GITHUB_STEP_SUMMARY
+          echo "- **📦 S3 Storage**: Document bucket with encryption" >> $GITHUB_STEP_SUMMARY
+          echo "- **🤖 Bedrock Knowledge Base**: AI-powered document search" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 📋 **Database Details**:" >> $GITHUB_STEP_SUMMARY
-          echo "- **VPC**: $(terraform output -raw vpc_id 2>/dev/null || echo 'N/A')" >> $GITHUB_STEP_SUMMARY
-          echo "- **Aurora Cluster**: $(terraform output -raw aurora_cluster_id 2>/dev/null || echo 'N/A')" >> $GITHUB_STEP_SUMMARY
-          echo "- **Aurora Instance**: $(terraform output -raw aurora_instance_id 2>/dev/null || echo 'N/A')" >> $GITHUB_STEP_SUMMARY
-          echo "- **Aurora Endpoint**: $(terraform output -raw aurora_cluster_endpoint 2>/dev/null || echo 'N/A')" >> $GITHUB_STEP_SUMMARY
-          echo "- **Database**: $(terraform output -raw aurora_database_name 2>/dev/null || echo 'N/A')" >> $GITHUB_STEP_SUMMARY
+          echo "### 📋 **Infrastructure Details**:" >> $GITHUB_STEP_SUMMARY
+          echo "- **VPC**: $(terraform output -raw vpc_id)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Aurora Cluster**: $(terraform output -raw aurora_cluster_id)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Aurora Database**: $(terraform output -raw aurora_database_name)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Aurora Endpoint**: $(terraform output -raw aurora_cluster_endpoint)" >> $GITHUB_STEP_SUMMARY
+          echo "- **S3 Bucket**: $(terraform output -raw s3_bucket_name)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Bedrock KB ID**: $(terraform output -raw bedrock_knowledge_base_id)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Bedrock KB ARN**: $(terraform output -raw bedrock_knowledge_base_arn)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Data Source ID**: $(terraform output -raw bedrock_data_source_id)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 🎯 **Test Status**: ✅ RDS COMPONENTS WORKING" >> $GITHUB_STEP_SUMMARY
-          echo "- **Environment**: $(terraform output -raw environment 2>/dev/null || echo 'N/A')" >> $GITHUB_STEP_SUMMARY
-          echo "- **Region**: $(terraform output -raw aws_region 2>/dev/null || echo 'N/A')" >> $GITHUB_STEP_SUMMARY
-          echo "- **Project**: $(terraform output -raw project_name 2>/dev/null || echo 'N/A')" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔐 **Authentication & Lambda**:" >> $GITHUB_STEP_SUMMARY
+          echo "- **Cognito User Pool**: $(terraform output -raw cognito_user_pool_id)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Cognito Client**: $(terraform output -raw cognito_user_pool_client_id)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Cognito Domain**: $(terraform output -raw cognito_user_pool_domain)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Post Confirmation Lambda**: $(terraform output -raw post_confirmation_lambda_name)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Lambda Role**: $(terraform output -raw lambda_role_arn)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 🔧 **Next Steps**: Deploy Complete Infrastructure" >> $GITHUB_STEP_SUMMARY
-          echo "RDS database test successful! Ready to deploy full infrastructure." >> $GITHUB_STEP_SUMMARY
+          echo "### 🎯 **Deployment Status**: ✅ PRODUCTION READY" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: $(terraform output -raw environment)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Region**: $(terraform output -raw aws_region)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Project**: $(terraform output -raw project_name)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔧 **Architecture**: Complete AI-Powered Platform" >> $GITHUB_STEP_SUMMARY
+          echo "Ready for document ingestion, user authentication, and AI-powered search!" >> $GITHUB_STEP_SUMMARY
 
       - name: Upload Infrastructure Outputs
         uses: actions/upload-artifact@v4
@@ -383,17 +389,21 @@ jobs:
 
       - name: Destroy Summary
         run: |
-          echo "## 💥 RDS Database Test Infrastructure Destroyed" >> $GITHUB_STEP_SUMMARY
-          echo "✅ All test infrastructure resources have been removed" >> $GITHUB_STEP_SUMMARY
+          echo "## 💥 COMPLETE text2Agent Infrastructure Destroyed" >> $GITHUB_STEP_SUMMARY
+          echo "✅ All infrastructure resources have been removed" >> $GITHUB_STEP_SUMMARY
           echo "✅ Terraform state is clean" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 🗑️ **Test Infrastructure Destroyed**:" >> $GITHUB_STEP_SUMMARY
+          echo "### 🗑️ **Infrastructure Destroyed**:" >> $GITHUB_STEP_SUMMARY
           echo "- **🌐 VPC & Networking**: VPC, subnets, security groups" >> $GITHUB_STEP_SUMMARY
           echo "- **🗄️ Aurora PostgreSQL**: Cluster, instance, database" >> $GITHUB_STEP_SUMMARY
-          echo "- **📋 Database Schema**: pgvector, tables, indexes" >> $GITHUB_STEP_SUMMARY
+          echo "- **🔐 Authentication**: Cognito User Pool, client, domain" >> $GITHUB_STEP_SUMMARY
+          echo "- **⚡ Lambda Functions**: Post-confirmation function, layers, roles" >> $GITHUB_STEP_SUMMARY
+          echo "- **📦 S3 Storage**: Document bucket with all configurations" >> $GITHUB_STEP_SUMMARY
+          echo "- **🤖 Bedrock Knowledge Base**: AI knowledge base and data sources" >> $GITHUB_STEP_SUMMARY
+          echo "- **🔒 IAM Resources**: Roles, policies, permissions" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 🎯 **Test Cleanup Status**: ✅ COMPLETE" >> $GITHUB_STEP_SUMMARY
-          echo "All test AWS resources have been safely removed from your account." >> $GITHUB_STEP_SUMMARY
+          echo "### 🎯 **Cleanup Status**: ✅ COMPLETE" >> $GITHUB_STEP_SUMMARY
+          echo "All AWS resources have been safely removed from your account." >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 🔧 **Ready for Full Deployment**" >> $GITHUB_STEP_SUMMARY
-          echo "RDS test successful! Ready to deploy complete infrastructure." >> $GITHUB_STEP_SUMMARY
+          echo "### 🔧 **Ready for Redeployment**" >> $GITHUB_STEP_SUMMARY
+          echo "Infrastructure can be redeployed at any time using this workflow." >> $GITHUB_STEP_SUMMARY

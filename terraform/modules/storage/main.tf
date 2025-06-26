@@ -1,15 +1,11 @@
-# Random ID for unique bucket naming
-resource "random_id" "bucket_suffix" {
-  byte_length = 4
-}
-
 # STR Data Store Bucket
 resource "aws_s3_bucket" "str_data_store" {
-  bucket = "${var.project_name}-${var.environment}-str-data-store-${random_id.bucket_suffix.hex}"
+  bucket = "str-data-store-bucket"
 
   tags = {
-    Name        = "${var.project_name}-${var.environment}-str-data-store"
+    Name        = "str-data-store-bucket"
     Environment = var.environment
+    Project     = var.project_name
     Purpose     = "STR Data Storage"
   }
 }

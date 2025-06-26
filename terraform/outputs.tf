@@ -3,91 +3,166 @@
 # Complete text2Agent infrastructure outputs
 # =====================================================
 
-# VPC and Networking Outputs
+# ==============================================================================
+# TEXT2AGENT INFRASTRUCTURE OUTPUTS - MODULAR DEPLOYMENT
+# Complete infrastructure outputs sourced from modules
+# ==============================================================================
+
+# ==============================================================================
+# NETWORKING OUTPUTS
+# ==============================================================================
+
 output "vpc_id" {
   description = "ID of the VPC"
-  value       = aws_vpc.main.id
+  value       = module.networking.vpc_id
 }
 
 output "vpc_cidr_block" {
   description = "CIDR block of the VPC"
-  value       = aws_vpc.main.cidr_block
+  value       = module.networking.vpc_cidr_block
 }
 
 output "private_subnet_ids" {
   description = "IDs of the private subnets"
-  value       = aws_subnet.private[*].id
+  value       = module.networking.private_subnet_ids
 }
 
-# Aurora Database Outputs
+output "public_subnet_ids" {
+  description = "IDs of the public subnets"
+  value       = module.networking.public_subnet_ids
+}
+
+# ==============================================================================
+# DATABASE OUTPUTS
+# ==============================================================================
+
 output "aurora_cluster_id" {
   description = "Aurora cluster identifier"
-  value       = aws_rds_cluster.aurora.cluster_identifier
+  value       = module.database.cluster_identifier
 }
 
 output "aurora_cluster_arn" {
   description = "Aurora cluster ARN"
-  value       = aws_rds_cluster.aurora.arn
+  value       = module.database.cluster_arn
 }
 
 output "aurora_cluster_endpoint" {
   description = "Aurora cluster endpoint"
-  value       = aws_rds_cluster.aurora.endpoint
-}
-
-output "aurora_instance_id" {
-  description = "Aurora instance identifier"
-  value       = aws_rds_cluster_instance.aurora.identifier
-}
-
-output "aurora_instance_endpoint" {
-  description = "Aurora instance endpoint"
-  value       = aws_rds_cluster_instance.aurora.endpoint
+  value       = module.database.cluster_endpoint
 }
 
 output "aurora_database_name" {
-  description = "Aurora database name"
-  value       = aws_rds_cluster.aurora.database_name
+  description = "Aurora primary database name (str_kb)"
+  value       = module.database.database_name
 }
 
-# S3 Storage Outputs
+output "aurora_tenants_database_name" {
+  description = "Aurora tenants database name"
+  value       = module.database.tenants_database_name
+}
+
+output "aurora_master_username" {
+  description = "Aurora master username"
+  value       = module.database.master_username
+  sensitive   = true
+}
+
+output "aurora_port" {
+  description = "Aurora port"
+  value       = module.database.port
+}
+
+output "aurora_secret_arn" {
+  description = "ARN of the Secrets Manager secret containing database credentials"
+  value       = module.database.secret_arn
+}
+
+output "aurora_secret_name" {
+  description = "Name of the Secrets Manager secret containing database credentials"
+  value       = module.database.secret_name
+}
+
+output "aurora_security_group_id" {
+  description = "Aurora security group ID"
+  value       = module.database.rds_security_group_id
+}
+
+# ==============================================================================
+# STORAGE OUTPUTS
+# ==============================================================================
+
 output "s3_bucket_name" {
   description = "Name of the S3 bucket for documents"
-  value       = aws_s3_bucket.documents.bucket
+  value       = module.storage.s3_bucket_name
 }
 
 output "s3_bucket_arn" {
   description = "ARN of the S3 bucket for documents"
-  value       = aws_s3_bucket.documents.arn
+  value       = module.storage.s3_bucket_arn
 }
 
-output "s3_bucket_region" {
-  description = "Region of the S3 bucket"
-  value       = aws_s3_bucket.documents.region
+output "s3_bucket_domain_name" {
+  description = "Domain name of the S3 bucket"
+  value       = module.storage.s3_bucket_domain_name
 }
 
-# Bedrock Knowledge Base Outputs
+output "s3_bucket_regional_domain_name" {
+  description = "Regional domain name of the S3 bucket"
+  value       = module.storage.s3_bucket_regional_domain_name
+}
+
+# ==============================================================================
+# AI/BEDROCK OUTPUTS
+# ==============================================================================
+
 output "bedrock_knowledge_base_id" {
   description = "Bedrock Knowledge Base ID"
-  value       = aws_bedrockagent_knowledge_base.main.id
+  value       = module.ai.knowledge_base_id
 }
 
 output "bedrock_knowledge_base_arn" {
   description = "Bedrock Knowledge Base ARN"
-  value       = aws_bedrockagent_knowledge_base.main.arn
-}
-
-output "bedrock_knowledge_base_name" {
-  description = "Bedrock Knowledge Base name"
-  value       = aws_bedrockagent_knowledge_base.main.name
+  value       = module.ai.knowledge_base_arn
 }
 
 output "bedrock_data_source_id" {
   description = "Bedrock S3 Data Source ID"
-  value       = aws_bedrockagent_data_source.s3.data_source_id
+  value       = module.ai.data_source_id
 }
 
-# Cognito Authentication Outputs
+output "bedrock_service_role_arn" {
+  description = "Bedrock service role ARN"
+  value       = module.ai.bedrock_service_role_arn
+}
+
+output "embedding_model_arn" {
+  description = "ARN of the embedding model"
+  value       = module.ai.embedding_model_arn
+}
+
+# ==============================================================================
+# SECURITY OUTPUTS
+# ==============================================================================
+
+output "app_secrets_arn" {
+  description = "ARN of the application secrets"
+  value       = module.security.app_secrets_arn
+}
+
+output "app_secrets_name" {
+  description = "Name of the application secrets"
+  value       = module.security.app_secrets_name
+}
+
+output "enhanced_monitoring_role_arn" {
+  description = "ARN of the enhanced monitoring IAM role"
+  value       = module.security.enhanced_monitoring_role_arn
+}
+
+# ==============================================================================
+# AUTH OUTPUTS
+# ==============================================================================
+
 output "cognito_user_pool_id" {
   description = "Cognito User Pool ID"
   value       = module.auth.cognito_user_pool_id
@@ -113,7 +188,6 @@ output "cognito_user_pool_endpoint" {
   value       = module.auth.cognito_user_pool_endpoint
 }
 
-# Lambda Function Outputs
 output "post_confirmation_lambda_name" {
   description = "Post Confirmation Lambda function name"
   value       = module.auth.post_confirmation_lambda_name
@@ -134,24 +208,15 @@ output "lambda_role_name" {
   value       = module.auth.lambda_role_name
 }
 
-# IAM Outputs
-output "bedrock_kb_role_arn" {
-  description = "Bedrock Knowledge Base IAM role ARN"
-  value       = aws_iam_role.bedrock_kb_role.arn
-}
-
-# Security Groups Outputs
-output "aurora_security_group_id" {
-  description = "Aurora security group ID"
-  value       = aws_security_group.aurora.id
-}
-
 output "lambda_security_group_id" {
   description = "Lambda security group ID"
   value       = module.auth.lambda_security_group_id
 }
 
-# Project Information
+# ==============================================================================
+# PROJECT INFORMATION
+# ==============================================================================
+
 output "project_name" {
   description = "Project name"
   value       = var.project_name
@@ -167,18 +232,36 @@ output "aws_region" {
   value       = var.aws_region
 }
 
-# Infrastructure Summary
+# ==============================================================================
+# INFRASTRUCTURE SUMMARY
+# ==============================================================================
+
 output "infrastructure_summary" {
   description = "Summary of deployed infrastructure"
   value = {
-    vpc_id                 = aws_vpc.main.id
-    aurora_cluster         = aws_rds_cluster.aurora.cluster_identifier
-    aurora_instance        = aws_rds_cluster_instance.aurora.identifier
-    s3_bucket              = aws_s3_bucket.documents.bucket
-    bedrock_knowledge_base = aws_bedrockagent_knowledge_base.main.name
-    cognito_user_pool      = module.auth.cognito_user_pool_id
-    lambda_function        = module.auth.post_confirmation_lambda_name
-    bedrock_kb_id          = aws_bedrockagent_knowledge_base.main.id
-    bedrock_data_source_id = aws_bedrockagent_data_source.s3.data_source_id
+    # Networking
+    vpc_id          = module.networking.vpc_id
+    private_subnets = module.networking.private_subnet_ids
+    public_subnets  = module.networking.public_subnet_ids
+
+    # Database
+    aurora_cluster  = module.database.cluster_identifier
+    aurora_endpoint = module.database.cluster_endpoint
+
+    # Storage
+    s3_bucket = module.storage.s3_bucket_name
+
+    # AI/Bedrock
+    knowledge_base_id = module.ai.knowledge_base_id
+    data_source_id    = module.ai.data_source_id
+
+    # Authentication
+    cognito_user_pool = module.auth.cognito_user_pool_id
+    lambda_function   = module.auth.post_confirmation_lambda_name
+
+    # Environment
+    project_name = var.project_name
+    environment  = var.environment
+    aws_region   = var.aws_region
   }
 } 
