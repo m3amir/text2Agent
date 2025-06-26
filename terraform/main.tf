@@ -289,9 +289,9 @@ resource "null_resource" "init_database" {
         --region "${var.aws_region}"
     EOF
 
-    environment = {
+    environment = var.aws_profile != "" ? {
       AWS_PROFILE = var.aws_profile
-    }
+    } : {}
   }
 
   depends_on = [aws_rds_cluster_instance.aurora]
