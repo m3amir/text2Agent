@@ -477,7 +477,7 @@ resource "null_resource" "bedrock_readiness_check" {
         --region ${var.aws_region} \
         --output text 2>/dev/null || echo "FAILED")
       
-      if [[ "$TABLE_CHECK" == *"embedding"* && "$TABLE_CHECK" == *"chunks"* && "$TABLE_CHECK" == *"metadata"* ]]; then
+      if echo "$TABLE_CHECK" | grep -q "embedding" && echo "$TABLE_CHECK" | grep -q "chunks" && echo "$TABLE_CHECK" | grep -q "metadata"; then
         echo "✅ Table structure verified"
       else
         echo "❌ Table structure validation failed"
@@ -494,7 +494,7 @@ resource "null_resource" "bedrock_readiness_check" {
         --region ${var.aws_region} \
         --output text 2>/dev/null || echo "FAILED")
       
-      if [[ "$INDEX_CHECK" == *"idx_bedrock_kb_embedding"* ]]; then
+      if echo "$INDEX_CHECK" | grep -q "idx_bedrock_kb_embedding"; then
         echo "✅ HNSW index verified"
       else
         echo "❌ HNSW index validation failed"
@@ -511,7 +511,7 @@ resource "null_resource" "bedrock_readiness_check" {
         --region ${var.aws_region} \
         --output text 2>/dev/null || echo "FAILED")
       
-      if [[ "$ACCESS_CHECK" != "FAILED" ]]; then
+      if [ "$ACCESS_CHECK" != "FAILED" ]; then
         echo "✅ Table access verified"
       else
         echo "❌ Table access validation failed"
