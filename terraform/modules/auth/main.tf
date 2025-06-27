@@ -118,7 +118,7 @@ resource "aws_lambda_layer_version" "psycopg2_layer" {
   layer_name               = "${var.project_name}-${var.environment}-psycopg2-layer"
   description              = "psycopg2 library for PostgreSQL connectivity - Python 3.11 ARM64 Linux compatible v2.9.9"
   compatible_architectures = ["arm64"]
-  source_code_hash         = filebase64sha256(var.psycopg2_layer_zip_path)
+  source_code_hash         = fileexists(var.psycopg2_layer_zip_path) ? filebase64sha256(var.psycopg2_layer_zip_path) : null
 
   compatible_runtimes = ["python3.11", "python3.12"]
 }
@@ -155,6 +155,7 @@ resource "aws_security_group_rule" "lambda_to_rds" {
 
 # Post Confirmation Lambda for Cognito
 resource "aws_lambda_function" "post_confirmation" {
+  count            = fileexists(var.lambda_zip_path) ? 1 : 0
   filename         = var.lambda_zip_path
   function_name    = "text2Agent-Post-Confirmation"
   role             = aws_iam_role.lambda_execution_role.arn
@@ -163,7 +164,7 @@ resource "aws_lambda_function" "post_confirmation" {
   timeout          = 120
   architectures    = ["arm64"]
   description      = "PostConfirmation trigger with Linux-compatible psycopg2 layer"
-  source_code_hash = filebase64sha256(var.lambda_zip_path)
+  source_code_hash = fileexists(var.lambda_zip_path) ? filebase64sha256(var.lambda_zip_path) : null
 
   # Add the psycopg2 layer (only if it exists)
   layers = length(aws_lambda_layer_version.psycopg2_layer) > 0 ? [aws_lambda_layer_version.psycopg2_layer[0].arn] : []
@@ -248,8 +249,11 @@ resource "aws_cognito_user_pool" "main" {
     email_message        = "Your verification code is {####}"
   }
 
-  lambda_config {
-    post_confirmation = aws_lambda_function.post_confirmation.arn
+  dynamic "lambda_config" {
+    for_each = length(aws_lambda_function.post_confirmation) > 0 ? [1] : []
+    content {
+      post_confirmation = aws_lambda_function.post_confirmation[0].arn
+    }
   }
 
   account_recovery_setting {
@@ -330,9 +334,10 @@ resource "aws_cognito_user_pool_domain" "main" {
 
 # Permission for Cognito to invoke Lambda
 resource "aws_lambda_permission" "allow_cognito_invoke" {
+  count         = length(aws_lambda_function.post_confirmation) > 0 ? 1 : 0
   statement_id  = "AllowExecutionFromCognito"
   action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.post_confirmation.function_name
+  function_name = aws_lambda_function.post_confirmation[0].function_name
   principal     = "cognito-idp.amazonaws.com"
   source_arn    = aws_cognito_user_pool.main.arn
 } 

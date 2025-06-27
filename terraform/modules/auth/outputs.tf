@@ -25,12 +25,12 @@ output "cognito_user_pool_endpoint" {
 
 output "post_confirmation_lambda_name" {
   description = "Name of the post confirmation Lambda function"
-  value       = aws_lambda_function.post_confirmation.function_name
+  value       = length(aws_lambda_function.post_confirmation) > 0 ? aws_lambda_function.post_confirmation[0].function_name : ""
 }
 
 output "post_confirmation_lambda_arn" {
   description = "ARN of the post confirmation Lambda function"
-  value       = aws_lambda_function.post_confirmation.arn
+  value       = length(aws_lambda_function.post_confirmation) > 0 ? aws_lambda_function.post_confirmation[0].arn : ""
 }
 
 output "lambda_role_arn" {
