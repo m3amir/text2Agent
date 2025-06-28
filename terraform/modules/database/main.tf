@@ -100,7 +100,7 @@ resource "aws_rds_cluster" "main" {
   serverlessv2_scaling_configuration {
     max_capacity             = 2
     min_capacity             = 0
-    seconds_until_auto_pause = 900  # 15 minutes auto-pause timeout
+    seconds_until_auto_pause = 900 # 15 minutes auto-pause timeout
   }
 
   tags = {
