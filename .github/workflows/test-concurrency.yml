@@ -86,7 +86,7 @@ jobs:
           echo "🔒 Starting long-running Terraform operation..."
           echo "This will hold the DynamoDB lock for ${{ github.event.inputs.hold_duration }} seconds"
           
-          # Create a terraform plan that includes a sleep to simulate long operation
+          # Create a simple terraform resource that will actually be applied
           cat > test_long_operation.tf << 'EOF'
           resource "null_resource" "lock_test" {
             provisioner "local-exec" {
@@ -100,12 +100,17 @@ jobs:
           }
           EOF
           
-          # Run terraform plan (which will acquire and hold the lock)
-          terraform plan -var="aws_region=${{ env.AWS_REGION }}" -var="aws_profile=" -target=null_resource.lock_test
+          # Use terraform apply to actually execute the provisioner and hold the lock
+          echo "🚀 Running terraform apply (this will actually hold the lock)..."
+          terraform apply -auto-approve -var="aws_region=${{ env.AWS_REGION }}" -var="aws_profile=" -target=null_resource.lock_test
           
           echo "✅ Long operation completed - lock should now be released"
           
-          # Clean up test resource
+          # Clean up the test resource
+          echo "🧹 Cleaning up test resource..."
+          terraform destroy -auto-approve -var="aws_region=${{ env.AWS_REGION }}" -var="aws_profile=" -target=null_resource.lock_test
+          
+          # Remove test file
           rm -f test_long_operation.tf
 
   # Test 2: Manual lock creation for testing
@@ -168,9 +173,10 @@ jobs:
           echo "**Test ID:** ${{ needs.test-setup.outputs.test_id }}" >> $GITHUB_STEP_SUMMARY
           echo "**Lock Duration:** ${{ github.event.inputs.hold_duration }} seconds" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 🔒 Lock Status: ACTIVE" >> $GITHUB_STEP_SUMMARY
-          echo "Try running the main terraform workflow now." >> $GITHUB_STEP_SUMMARY
-          echo "It should be **BLOCKED** until this test completes." >> $GITHUB_STEP_SUMMARY
+          echo "### 🔒 Lock Status: ACTIVE - PERFECT TIME TO TEST!" >> $GITHUB_STEP_SUMMARY
+          echo "**RIGHT NOW**: Go to Actions tab and run 'Deploy Terraform Infrastructure'" >> $GITHUB_STEP_SUMMARY
+          echo "**Expected Result**: It should be **BLOCKED** at 'stale-lock-check' step" >> $GITHUB_STEP_SUMMARY
+          echo "**Success Message**: 🚨 ACTIVE LOCKS DETECTED - WORKFLOW BLOCKED" >> $GITHUB_STEP_SUMMARY
           
           sleep ${{ github.event.inputs.hold_duration }}
 
