@@ -1,835 +1,547 @@
-# Text2Agent Infrastructure
+# Text2Agent Terraform Infrastructure
 
-This directory contains the complete Terraform infrastructure for the Text2Agent project - a production-ready Bedrock Knowledge Base system with Aurora PostgreSQL vector database, designed for multi-tenant document search and AI-powered applications.
+Complete AWS infrastructure for the Text2Agent project - a production-ready Bedrock Knowledge Base system with Aurora PostgreSQL vector database and comprehensive state locking protection.
 
-## 🏗️ Architecture Overview
+## 🔒 **State Locking & Concurrency Protection**
 
+### **Overview**
+This infrastructure uses **DynamoDB-based state locking** to prevent concurrent Terraform operations that could corrupt infrastructure state. The system automatically detects, analyzes, and handles both active and stale locks.
+
+### **Lock Detection System**
+
+#### **How It Works**
 ```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                         Text2Agent Infrastructure                                │
-│                        (Account: 994626600571, Region: eu-west-2)              │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                 │
-│  ┌─────────────────┐   ┌──────────────────┐   ┌─────────────────────────────┐  │
-│  │   Cognito       │   │   S3 Bucket      │   │   Aurora Cluster            │  │
-│  │ User Pool       │   │ str-data-store-  │   │ text2agent-dev-cluster      │  │
-│  │ + Lambda Hooks  │   │ bucket           │   │ (PostgreSQL 15.4)           │  │
-│  └─────────────────┘   └──────────────────┘   └─────────────────────────────┘  │
-│         │                        │                          │                  │
-│         │                        │                          │                  │
-│         ▼                        ▼                          ▼                  │
-│  ┌─────────────────┐   ┌──────────────────┐   ┌─────────────────────────────┐  │
-│  │ Lambda Post-    │   │   Bedrock        │   │   Database 1: str_kb        │  │
-│  │ Confirmation    │   │ Knowledge Base   │   │   • bedrock_integration     │  │
-│  │ (User mgmt)     │   │ ID: Generated    │   │   • HNSW vector index       │  │
-│  └─────────────────┘   └──────────────────┘   │                             │  │
-│                                                │   Database 2: text2Agent-   │  │
-│                                                │   Tenants                   │  │
-│                                                │   • tenantmappings          │  │
-│                                                │   • users                   │  │
-│                                                └─────────────────────────────┘  │
-│                                                                                 │
-│              ┌─────────────────────────────────────────────────────┐           │
-│              │                   VPC Network                       │           │
-│              │  ┌─────────────┐              ┌─────────────────┐   │           │
-│              │  │ Public      │              │ Private         │   │           │
-│              │  │ Subnets     │              │ Subnets         │   │           │
-│              │  │ (NAT GW)    │              │ (DB, Lambda)    │   │           │
-│              │  │ AZ-a, AZ-b  │              │ AZ-a, AZ-b      │   │           │
-│              │  └─────────────┘              └─────────────────┘   │           │
-│              └─────────────────────────────────────────────────────┘           │
-└─────────────────────────────────────────────────────────────────────────────────┘
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│   Workflow      │    │   DynamoDB       │    │   Decision      │
+│   Starts        │───▶│   Lock Check     │───▶│   Engine        │
+└─────────────────┘    └──────────────────┘    └─────────────────┘
+                                                         │
+                              ┌──────────────────────────┼──────────────────────────┐
+                              ▼                          ▼                          ▼
+                    ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+                    │  No Locks       │    │  Active Lock    │    │  Stale Lock     │
+                    │  ✅ Proceed     │    │  ❌ Block       │    │  ⏳ Approval   │
+                    └─────────────────┘    └─────────────────┘    └─────────────────┘
 ```
 
-### Data Flow Architecture
-```
-Documents (PDF/TXT) → S3 Bucket → Bedrock Knowledge Base → Titan Embeddings 
-                                         ↓
-Vector Embeddings (1024d) → Aurora PostgreSQL → HNSW Index → Fast Search
-                                         ↓
-User Queries → Semantic Search → Top-K Results → Application
-```
+#### **Lock States Explained**
 
-## 📂 Detailed Module Structure
+**✅ No Locks Found**
+- DynamoDB table empty or no relevant lock entries
+- Workflow proceeds automatically
+- Normal operation state
 
-This infrastructure uses a **modular approach** for better organization, reusability, and dependency management:
+**❌ Active Lock Detected**
+- Lock exists and is less than 30 minutes old
+- OR lock is from a currently running GitHub Actions workflow  
+- Workflow **immediately blocked** to prevent corruption
+- Manual intervention required: wait for active operation to complete
 
-```
-terraform/
-├── main.tf              # Root module - orchestrates all child modules
-├── variables.tf         # Input variables (project_name, environment, etc.)
-├── outputs.tf           # Output values (endpoints, IDs, connection strings)
-├── terraform.tfvars     # Variable values (gitignored - local only)
-├── backend.tf           # S3 backend configuration for state management
-└── modules/
-    ├── networking/      # Module 1: VPC Foundation
-    │   ├── main.tf      # VPC, subnets (public/private), route tables
-    │   ├── variables.tf # CIDR blocks, AZ configuration
-    │   └── outputs.tf   # VPC ID, subnet IDs, security group IDs
-    │
-    ├── security/        # Module 2: IAM & Secrets
-    │   ├── main.tf      # IAM roles, policies, Secrets Manager
-    │   ├── variables.tf # Role configurations, policy permissions
-    │   └── outputs.tf   # Role ARNs, secret ARNs, policy attachments
-    │
-    ├── storage/         # Module 3: S3 Storage
-    │   ├── main.tf      # S3 bucket with versioning, encryption
-    │   ├── variables.tf # Bucket naming, lifecycle policies
-    │   └── outputs.tf   # Bucket name, bucket ARN
-    │
-    ├── database/        # Module 4: Aurora PostgreSQL
-    │   ├── main.tf      # Aurora cluster, instances, parameter groups
-    │   ├── variables.tf # DB configuration, instance types
-    │   ├── outputs.tf   # Endpoints, connection details
-    │   └── scripts/     # SQL initialization scripts
-    │       ├── init_str_kb.sql           # Bedrock database setup
-    │       └── init_text2agent_tenants.sql # Tenant management setup
-    │
-    ├── ai/              # Module 5: Bedrock Knowledge Base
-    │   ├── main.tf      # Knowledge Base, Data Source configurations
-    │   ├── variables.tf # Model selection, indexing parameters
-    │   └── outputs.tf   # Knowledge Base ID, Data Source ID
-    │
-    └── auth/            # Module 6: Authentication & User Management
-        ├── main.tf      # Cognito User Pool, Lambda functions
-        ├── variables.tf # Pool configuration, Lambda settings
-        ├── outputs.tf   # User Pool ID, Lambda function ARNs
-        └── lambda/      # Lambda function source code
-            ├── post_confirmation.py      # User registration handler
-            └── requirements.txt          # Python dependencies
-```
+**⏳ Stale Lock Detected**
+- Lock exists but is older than 30 minutes
+- OR lock is from a failed/cancelled workflow
+- Workflow pauses for **manual approval** to remove stale lock
+- Safe to approve if no other operations are running
 
-### Module Dependencies
-```
-networking (VPC, subnets)
-    ↓
-security (IAM roles, secrets) + storage (S3 bucket)
-    ↓
-database (Aurora cluster) - depends on: networking, security
-    ↓
-ai (Bedrock KB) - depends on: database, storage, security
-    ↓
-auth (Cognito + Lambda) - depends on: database, security
-```
+### **Lock Detection Logic**
 
-**Key Design Principles:**
-- **Separation of Concerns**: Each module handles one infrastructure domain
-- **Dependency Management**: Modules depend on outputs from prerequisite modules
-- **Reusability**: Modules can be reused across environments (dev/staging/prod)
-- **State Isolation**: Each module can be planned/applied independently
-- **Security First**: IAM roles follow least-privilege principles
-
-## 🔄 How Terraform Works: Infrastructure as Code
-
-### Terraform State Management
-
-Terraform tracks your infrastructure using a **state file** that maps your configuration to real AWS resources:
-
-```
-Local Config (*.tf files) ←→ Terraform State ←→ AWS Resources
-```
-
-**State File Location:**
-- **Local Development**: `.terraform/terraform.tfstate` (temporary)
-- **Production**: S3 backend `s3://text2agent-terraform-state-eu-west-2/text2agent/production/terraform.tfstate`
-
-**Why State Matters:**
-- **Tracks Resource Ownership**: Knows which AWS resources belong to this Terraform config
-- **Enables Updates**: Can modify existing resources instead of recreating them
-- **Prevents Drift**: Detects when AWS resources have been changed outside Terraform
-- **Dependency Resolution**: Understands the order in which resources must be created/destroyed
-
-### Terraform Operations Explained
-
-#### 1. `terraform plan` - Preview Changes
 ```bash
-terraform plan -var="aws_profile=m3"
-```
-**What it does:**
-- Compares your `.tf` files against current state
-- Queries AWS to check actual resource status
-- Shows exactly what will be created/modified/destroyed
-- **NEVER** makes actual changes - it's completely safe
-
-**Example output:**
-```
-Plan: 5 to add, 2 to change, 1 to destroy.
-
-+ aws_db_cluster.aurora_cluster
-+ aws_s3_bucket.documents
-~ aws_iam_role.bedrock_role
-  - aws_security_group.old_sg
+# Lock Age Analysis
+if lock_age > 30_minutes:
+    status = "stale"
+elif github_workflow_still_running(lock.who):
+    status = "active" 
+elif lock.who contains "cancelled|failed|timeout":
+    status = "stale"
+elif lock_age < 10_minutes:
+    status = "active" # Conservative approach
+else:
+    status = "stale"
 ```
 
-#### 2. `terraform apply` - Make Changes
-```bash
-terraform apply -var="aws_profile=m3"
-```
-**What it does:**
-- Runs `terraform plan` first
-- Asks for confirmation (unless `-auto-approve`)
-- Executes the planned changes in correct order
-- Updates the state file
-- Shows outputs when complete
+### **DynamoDB Lock Table Structure**
 
-#### 3. `terraform destroy` - Remove Everything
-```bash
-terraform destroy -var="aws_profile=m3"
-```
-**⚠️ DANGER**: This deletes ALL resources managed by this Terraform config!
+**Table Name:** `text2agent-terraform-state-lock`  
+**Region:** `eu-west-2`
 
-### Resource Lifecycle: What Gets Created/Updated/Destroyed
-
-#### 🟢 Resources That Update In-Place (No Downtime)
-These can be modified without recreating:
-- **Tags** on any resource
-- **IAM policy** attachments
-- **Lambda function** code
-- **S3 bucket** policies
-- **Cognito User Pool** attributes (most)
-- **Aurora cluster** parameter changes
-
-#### 🟡 Resources That Force Replacement (Recreates Resource)
-These changes destroy the old resource and create a new one:
-- **Aurora cluster identifier** change
-- **VPC CIDR block** change
-- **Database name** changes
-- **S3 bucket name** changes
-- **Lambda function name** changes
-
-#### 🔴 Destructive Operations (Data Loss Risk)
-These operations will DELETE data:
-- Changing Aurora cluster identifier → **Old database destroyed**
-- Changing S3 bucket name → **Old bucket destroyed**
-- Running `terraform destroy` → **Everything destroyed**
-
-### When Terraform Deletes Resources
-
-Terraform will delete resources in these scenarios:
-
-#### 1. **Resource Removed from Configuration**
-```hcl
-# If you remove this block from your .tf files:
-# resource "aws_s3_bucket" "example" {
-#   bucket = "my-bucket"
-# }
-```
-**Result**: Terraform will delete the S3 bucket on next `apply`
-
-#### 2. **Resource Name Changed**
-```hcl
-# Old:
-resource "aws_db_cluster" "old_name" { ... }
-# New:
-resource "aws_db_cluster" "new_name" { ... }
-```
-**Result**: Terraform creates new cluster, then destroys old one
-
-#### 3. **Identifier/Name Properties Changed**
-```hcl
-resource "aws_db_cluster" "aurora" {
-  cluster_identifier = "new-cluster-name"  # Changed from "old-cluster-name"
-}
-```
-**Result**: Forces replacement - destroys old cluster, creates new one
-
-#### 4. **Dependency Changes**
-If a parent resource is replaced, dependent resources are also replaced:
-```
-VPC replacement → Subnets replaced → Aurora cluster replaced
-```
-
-### Preventing Accidental Deletions
-
-#### 1. **Use `terraform plan` First**
-Always preview changes before applying:
-```bash
-terraform plan -var="aws_profile=m3" | grep -E "(destroy|replace)"
-```
-
-#### 2. **Lifecycle Rules**
-```hcl
-resource "aws_db_cluster" "aurora" {
-  lifecycle {
-    prevent_destroy = true  # Prevents accidental deletion
+**Lock Entry Format:**
+```json
+{
+  "LockID": "text2agent-terraform-state-eu-west-2/text2agent/production/terraform.tfstate",
+  "Info": {
+    "ID": "unique-lock-id-12345",
+    "Operation": "OperationTypePlan",
+    "Who": "github-actions-runner-xyz",
+    "Version": "1.5.7",
+    "Created": "2024-01-15T10:30:00.000Z",
+    "Path": "text2agent-terraform-state-eu-west-2/text2agent/production/terraform.tfstate"
   }
 }
 ```
 
-#### 3. **State Backup**
-Before major changes:
+## 📋 **Scripts Reference**
+
+### **Core Lock Management Scripts**
+
+#### **1. `detect_and_handle_locks.sh`**
+**Purpose:** Primary lock detection and analysis engine
+
+**What it does:**
+- Queries DynamoDB for existing lock entries
+- Analyzes lock age and origin
+- Determines if locks are active or stale
+- Sets GitHub environment variables for workflow decisions
+- Blocks workflows when active locks detected
+
+**Usage:**
 ```bash
-# Backup state file
-cp terraform.tfstate terraform.tfstate.backup
+./detect_and_handle_locks.sh
+# Exit code 0: No locks or stale locks found
+# Exit code 1: Active locks detected - workflow should stop
 ```
 
-#### 4. **Import Existing Resources**
-If you have existing AWS resources:
+**GitHub Environment Variables Set:**
+- `STALE_LOCKS_FOUND`: true/false
+- `ACTIVE_LOCKS_FOUND`: true/false  
+- `LOCK_COUNT`: Number of locks found
+- `LOCK_IDS`: Lock IDs for approval process
+- `LOCK_DETAILS`: Formatted lock information for summaries
+
+#### **2. `unlock_approved_locks.sh`**
+**Purpose:** Removes stale locks after manual approval
+
+**What it does:**
+- Verifies AWS credentials and DynamoDB access
+- Validates lock IDs match approval request
+- Safely removes stale lock entries from DynamoDB
+- Confirms successful removal
+
+**Usage:**
 ```bash
-terraform import aws_s3_bucket.existing my-existing-bucket
+# Requires LOCK_IDS environment variable
+LOCK_IDS="lock-id-123" ./unlock_approved_locks.sh
 ```
 
-## Deployment Methods
+**Safety Features:**
+- Validates lock ID matches before removal
+- Confirms lock removal with verification query
+- Fails if lock changed since approval
 
-### Method 1: GitHub Actions (Recommended)
+#### **3. `setup_terraform_backend.sh`**
+**Purpose:** Initializes S3 backend and DynamoDB locking infrastructure
 
-**Fully automated deployment through GitHub:**
+**What it does:**
+- Creates S3 bucket with versioning and encryption
+- Creates DynamoDB table with proper schema
+- Configures bucket security and access controls
+- Generates backend configuration file
+- Verifies permissions
 
-1. **Push to main branch** → Triggers deployment
-2. **GitHub Actions** runs Terraform automatically
-3. **No local setup required!**
+**Creates:**
+- S3 bucket: `text2agent-terraform-state-eu-west-2`
+- DynamoDB table: `text2agent-terraform-state-lock`
+- Backend config: `backend-override.tf`
 
-```bash
-# Just push your changes:
-git add .
-git commit -m "Deploy infrastructure"
-git push origin main
-```
+#### **4. `build_psycopg2_layer.sh`** 
+**Purpose:** Builds Linux-compatible Lambda layer using Docker
 
-**GitHub Actions Process:**
-1. **Checkout code** from repository
-2. **Setup Terraform** (latest version)
-3. **Configure AWS credentials** (from GitHub Secrets)
-4. **Initialize backend** (`terraform init`)
-5. **Validate syntax** (`terraform validate`)
-6. **Format check** (`terraform fmt -check`)
-7. **Generate plan** (`terraform plan`)
-8. **Apply changes** (`terraform apply -auto-approve`)
-9. **Display outputs** (connection details)
+**What it does:**
+- Uses AWS SAM Docker image for Python 3.11
+- Compiles psycopg2-binary for Lambda runtime
+- Creates properly structured layer zip file
+- Optimizes layer size by removing unnecessary files
 
-### Method 2: Local Deployment
+**Requirements:**
+- Docker must be installed and running
+- Uses `public.ecr.aws/sam/build-python3.11:latest` image
 
-**For development and testing:**
+## 🔄 **GitHub Actions Workflow Integration**
 
-```bash
-# 1. Navigate to terraform directory
-cd terraform/
+### **Script Invocation Matrix**
 
-# 2. Initialize Terraform (downloads providers, configures backend)
-terraform init
+The terraform infrastructure uses **4 core scripts** that are automatically invoked by GitHub Actions at specific points in the workflow. Here's exactly where each script is called:
 
-# 3. Plan the deployment (see what will be created)
-terraform plan -var="aws_profile=m3"
+#### **📋 Complete Script Invocation Breakdown**
 
-# 4. Apply the changes (creates actual resources)
-terraform apply -var="aws_profile=m3"
-```
+| Script | Called In Job | Purpose | Frequency |
+|--------|---------------|---------|-----------|
+| `setup_terraform_backend.sh` | **6 jobs** | Initialize S3/DynamoDB backend | Before every terraform operation |
+| `detect_and_handle_locks.sh` | **3 jobs** | Lock detection & analysis | At critical decision points |
+| `unlock_approved_locks.sh` | **1 job** | Remove approved stale locks | Only after manual approval |
+| `build_psycopg2_layer.sh` | **1 job** | Build Lambda dependencies | Once per workflow run |
 
-**Local Development Benefits:**
-- **Faster feedback** - no CI/CD wait time
-- **Debug capability** - can inspect state and troubleshoot
-- **Partial deployments** - can target specific modules
-- **State inspection** - can examine current infrastructure state
+### **Detailed Script Execution Flow**
 
-## Configuration
+#### **1. `setup_terraform_backend.sh` - Called 6 Times**
 
-### Required Variables
+**This script runs BEFORE every terraform operation to ensure backend is ready:**
 
-Create a `terraform.tfvars` file with:
-
-```hcl
-# Basic Configuration
-project_name = "text2agent"
-environment  = "dev"
-aws_region   = "eu-west-2"
-
-# Local development only (not needed for GitHub Actions)
-aws_profile = "m3"
-```
-
-### AWS Profile Setup (Local Only)
-
-For local deployment, ensure your AWS profile is configured:
-
-```bash
-# Check if profile exists
-aws configure list-profiles
-
-# If 'm3' profile doesn't exist, create it:
-aws configure --profile m3
-```
-
-## 🗄️ Database Architecture
-
-### Two Databases in One Aurora Cluster
-
-The system creates **one Aurora PostgreSQL cluster** with **two separate databases**:
-
-#### 1. **str_kb Database** (Bedrock Knowledge Base)
-```sql
-Database: str_kb
-└── Schema: bedrock_integration
-    └── Table: bedrock_kb
-        ├── id (UUID)
-        ├── embedding (vector(1024))  ← HNSW indexed for fast similarity search
-        ├── chunks (TEXT)
-        └── metadata (JSON)
-```
-
-#### 2. **text2AgentTenants Database** (Multi-tenant Management)
-```sql
-Database: text2AgentTenants
-├── Table: tenantmappings
-│   ├── tenant_id (UUID)
-│   ├── domain (VARCHAR)
-│   └── bucket_name (VARCHAR)
-└── Table: users
-    ├── user_id (UUID)
-    ├── email (VARCHAR)
-    ├── tenant_id (UUID)
-    └── cognito_sub (VARCHAR)
-```
-
-## AI/ML Components
-
-### Amazon Bedrock Knowledge Base
-- **Model**: Amazon Titan Text Embeddings v2
-- **Vector Dimensions**: 1024
-- **Storage**: Aurora PostgreSQL with pgvector
-- **Index Type**: HNSW (Hierarchical Navigable Small World)
-- **Purpose**: Fast semantic search over document embeddings
-
-### Document Processing Flow
-```
-Documents (S3) → Bedrock → Embeddings → Aurora PostgreSQL → Search Results
-```
-
-## Security Features
-
-- **VPC Isolation**: All resources in private subnets
-- **IAM Roles**: Least-privilege access patterns
-- **Secrets Manager**: Database credentials securely stored
-- **Encryption**: 
-  - Aurora: Encryption at rest
-  - S3: Server-side encryption
-  - Secrets: Encrypted with KMS
-
-## What Gets Created
-
-When you deploy, Terraform creates:
-
-### Networking (6 resources)
-- 1 VPC with DNS hostnames enabled
-- 2 Public subnets (for NAT gateways)
-- 2 Private subnets (for databases/apps)
-- Route tables and NAT gateways
-
-### Database (5 resources)
-- 1 Aurora PostgreSQL cluster (`text2agent-dev-cluster`)
-- 1 Aurora instance (serverless)
-- 1 Secrets Manager secret (database credentials)
-- 2 Databases with proper schemas and indexes
-
-### AI/ML (2 resources)
-- 1 Bedrock Knowledge Base
-- 1 S3 Data Source connector
-
-### Authentication (4 resources)
-- 1 Cognito User Pool
-- 1 Lambda function (post-confirmation)
-- 1 Lambda layer (dependencies)
-- IAM roles and policies
-
-### Storage (1 resource)
-- 1 S3 bucket (`str-data-store-bucket`)
-
-**Total: ~25-30 AWS resources**
-
-## ⚡ Terraform Commands Reference
-
-### Basic Operations
-```bash
-# Initialize (required first time and after backend changes)
-terraform init
-
-# See what's currently deployed
-terraform state list
-
-# Check configuration syntax
-terraform validate
-
-# Format code (fixes indentation, style)
-terraform fmt
-
-# Check plan without applying (safe)
-terraform plan -var="aws_profile=m3"
-
-# Deploy everything
-terraform apply -var="aws_profile=m3"
-
-# Deploy with automatic approval (CI/CD)
-terraform apply -var="aws_profile=m3" -auto-approve
-
-# Destroy everything (⚠️ DESTRUCTIVE)
-terraform destroy -var="aws_profile=m3"
-```
-
-### Advanced State Management
-```bash
-# List all resources in state
-terraform state list
-
-# Show detailed info about a resource
-terraform state show aws_db_cluster.aurora_cluster
-
-# Remove a resource from state (doesn't delete AWS resource)
-terraform state rm aws_s3_bucket.example
-
-# Import existing AWS resource into state
-terraform import aws_s3_bucket.existing my-existing-bucket-name
-
-# Move resource in state (useful for refactoring)
-terraform state mv aws_s3_bucket.old aws_s3_bucket.new
-
-# Refresh state with actual AWS resource status
-terraform refresh -var="aws_profile=m3"
-
-# Show current state in human-readable format
-terraform show
-```
-
-### Targeted Operations
-```bash
-# Apply changes to specific resource only
-terraform apply -target=aws_db_cluster.aurora_cluster -var="aws_profile=m3"
-
-# Plan changes for specific module only
-terraform plan -target=module.database -var="aws_profile=m3"
-
-# Destroy specific resource only
-terraform destroy -target=aws_s3_bucket.documents -var="aws_profile=m3"
-
-# Apply changes to multiple specific resources
-terraform apply -target=module.ai -target=module.database -var="aws_profile=m3"
-```
-
-### Debugging and Inspection
-```bash
-# Enable detailed logging
-export TF_LOG=DEBUG
-terraform apply -var="aws_profile=m3"
-
-# Show outputs without applying
-terraform output
-
-# Show specific output value
-terraform output aurora_cluster_endpoint
-
-# Graph dependencies (requires graphviz)
-terraform graph | dot -Tpng > graph.png
-
-# Validate configuration with detailed errors
-terraform validate -json
-```
-
-### Workspace Management (Multi-Environment)
-```bash
-# List all workspaces
-terraform workspace list
-
-# Create new workspace (for different environment)
-terraform workspace new staging
-
-# Switch to workspace
-terraform workspace select production
-
-# Show current workspace
-terraform workspace show
-
-# Delete workspace
-terraform workspace delete staging
-```
-
-## 🔍 Accessing Your Infrastructure
-
-After deployment, you'll get outputs with connection details:
-
-```bash
-# Example outputs:
-aurora_cluster_endpoint = "text2agent-dev-cluster.cluster-xyz.eu-west-2.rds.amazonaws.com"
-bedrock_knowledge_base_id = "ABC123XYZ"
-cognito_user_pool_id = "eu-west-2_AbCdEfGhI"
-s3_bucket_name = "str-data-store-bucket"
-```
-
-## Comprehensive Troubleshooting Guide
-
-### Common Terraform Errors
-
-#### 1. **Exit Code 3 (Formatting Issues)**
-```bash
-Error: Configuration formatting issues
-```
-**Fix:**
-```bash
-terraform fmt
-terraform validate
-```
-
-#### 2. **State Lock Errors**
-```bash
-Error: Error acquiring the state lock
-```
-**Causes:**
-- Another terraform process running
-- Previous process crashed and left lock
-- Network interruption during apply
-
-**Fix:**
-```bash
-# List locks
-terraform force-unlock LOCK_ID
-
-# For S3 backend, check DynamoDB table for locks
-aws dynamodb scan --table-name terraform-state-lock --profile m3
-```
-
-#### 3. **Backend Initialization Errors**
-```bash
-Error: Failed to get existing workspaces
-```
-**Fix:**
-```bash
-# Re-initialize backend
-terraform init -reconfigure
-
-# Force initialize (overwrites local state)
-terraform init -force-copy
-```
-
-#### 4. **Provider Version Conflicts**
-```bash
-Error: Incompatible provider version
-```
-**Fix:**
-```bash
-# Upgrade providers to latest compatible versions
-terraform init -upgrade
-
-# Lock to specific versions (in versions.tf)
-terraform {
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 5.0"
-    }
-  }
-}
-```
-
-#### 5. **Resource Already Exists**
-```bash
-Error: Resource already exists
-```
-**Solutions:**
-```bash
-# Option 1: Import existing resource
-terraform import aws_s3_bucket.example existing-bucket-name
-
-# Option 2: Remove from state and let Terraform recreate
-terraform state rm aws_s3_bucket.example
-
-# Option 3: Rename resource in configuration
-resource "aws_s3_bucket" "example_new" {
-  # ... configuration
-}
-```
-
-#### 6. **AWS Permission Errors**
-```bash
-Error: AccessDenied: User: arn:aws:iam::ACCOUNT:user/USERNAME is not authorized
-```
-**Debug steps:**
-```bash
-# Check current AWS identity
-aws sts get-caller-identity --profile m3
-
-# Test specific permissions
-aws iam simulate-principal-policy \
-  --policy-source-arn arn:aws:iam::994626600571:user/your-user \
-  --action-names rds:CreateDBCluster \
-  --resource-arns "*" \
-  --profile m3
-
-# Check IAM policies attached to user/role
-aws iam list-attached-user-policies --user-name your-username --profile m3
-```
-
-### Aurora Database Issues
-
-#### **HNSW Index Creation Failures**
-```bash
-Error: executing SQL: CREATE INDEX ... USING hnsw
-```
-**Debug:**
-```bash
-# Check pgvector version
-psql -h YOUR_CLUSTER_ENDPOINT -U postgres -d str_kb -c "SELECT * FROM pg_available_extensions WHERE name = 'vector';"
-
-# Check if index exists
-psql -h YOUR_CLUSTER_ENDPOINT -U postgres -d str_kb -c "\\d bedrock_integration.bedrock_kb"
-
-# Manually create index (for testing)
-psql -h YOUR_CLUSTER_ENDPOINT -U postgres -d str_kb -c "CREATE INDEX ON bedrock_integration.bedrock_kb USING hnsw (embedding vector_cosine_ops);"
-```
-
-#### **Aurora Connection Timeouts**
-```bash
-Error: dial tcp: i/o timeout
-```
-**Causes & Fixes:**
-- **VPC Security Groups**: Check inbound rules allow port 5432
-- **Network ACLs**: Ensure subnet NACLs allow database traffic
-- **Aurora Status**: Check cluster is in 'available' state
-- **DNS Resolution**: Verify cluster endpoint resolves
-
-```bash
-# Test connectivity
-telnet your-cluster-endpoint.region.rds.amazonaws.com 5432
-
-# Check security groups
-aws ec2 describe-security-groups --group-ids sg-xxxxxxxxx --profile m3
-
-# Check Aurora cluster status
-aws rds describe-db-clusters --db-cluster-identifier text2agent-dev-cluster --profile m3
-```
-
-### Bedrock Knowledge Base Issues
-
-#### **Knowledge Base Creation Fails**
-```bash
-Error: ValidationException: The knowledge base storage configuration provided is invalid
-```
-**Common causes:**
-1. **Missing HNSW index** in Aurora database
-2. **Incorrect schema permissions**
-3. **Vector column not found**
-
-**Debug steps:**
-```bash
-# Verify database schema
-psql -h ENDPOINT -U postgres -d str_kb -c "\\dt bedrock_integration.*"
-
-# Check if HNSW index exists
-psql -h ENDPOINT -U postgres -d str_kb -c "\\di bedrock_integration.*"
-
-# Test vector operations
-psql -h ENDPOINT -U postgres -d str_kb -c "SELECT embedding <=> '[1,2,3,4]'::vector FROM bedrock_integration.bedrock_kb LIMIT 1;"
-```
-
-### GitHub Actions Failures
-
-#### **AWS Authentication Errors**
 ```yaml
-Error: No credentials found
-```
-**Fix in GitHub Secrets:**
-- `AWS_ACCESS_KEY_ID`: Your access key
-- `AWS_SECRET_ACCESS_KEY`: Your secret key  
-- `AWS_REGION`: `eu-west-2`
+# Job 1: terraform-check
+- name: Setup Backend
+  run: ./setup_terraform_backend.sh
 
-#### **Shell Compatibility Issues**
-```bash
-Error: [[: not found
-```
-**Cause**: GitHub Actions uses `/bin/sh` (dash), not bash
-**Fix**: Use POSIX-compatible syntax:
-```bash
-# Instead of: [[ "$var" == *"pattern"* ]]
-# Use: echo "$var" | grep -q "pattern"
+# Job 2: stale-lock-check  
+- name: Setup Backend
+  run: ./setup_terraform_backend.sh
 
-# Instead of: [[ "$var" != "FAILED" ]]  
-# Use: [ "$var" != "FAILED" ]
-```
+# Job 3: stale-lock-approval (conditional)
+- name: Setup Backend
+  run: ./setup_terraform_backend.sh
 
-### Recovery Procedures
+# Job 4: terraform-plan
+- name: Setup Backend
+  run: ./setup_terraform_backend.sh
 
-#### **Complete Infrastructure Recovery**
-If infrastructure is corrupted:
-```bash
-# 1. Backup current state
-cp terraform.tfstate terraform.tfstate.corrupted
+# Job 5: terraform-apply
+- name: Setup Backend
+  run: ./setup_terraform_backend.sh
 
-# 2. Import all existing resources
-terraform import aws_db_cluster.aurora_cluster text2agent-dev-cluster
-terraform import aws_s3_bucket.documents str-data-store-bucket
-# ... import other resources
-
-# 3. Or destroy and recreate (if no critical data)
-terraform destroy -var="aws_profile=m3"
-terraform apply -var="aws_profile=m3"
+# Job 6: terraform-destroy (conditional)
+- name: Setup Backend
+  run: ./setup_terraform_backend.sh
 ```
 
-#### **Partial Module Recovery**
-If specific module fails:
-```bash
-# Target specific module for recreation
-terraform destroy -target=module.ai -var="aws_profile=m3"
-terraform apply -target=module.ai -var="aws_profile=m3"
+**What it generates:**
+- Creates `backend-override.tf` with S3 backend configuration
+- Ensures DynamoDB lock table exists
+- Verifies AWS permissions and connectivity
+
+#### **2. `detect_and_handle_locks.sh` - Called 3 Times**
+
+**Strategic lock detection at key workflow decision points:**
+
+```yaml
+# Call 1: stale-lock-check (Primary lock analysis)
+- name: Check for Stale and Active Locks
+  run: ./detect_and_handle_locks.sh
+  # Sets: STALE_LOCKS_FOUND, ACTIVE_LOCKS_FOUND, LOCK_COUNT, LOCK_IDS
+
+# Call 2: stale-lock-approval (Re-verification before approval)
+- name: Get Lock Information  
+  run: ./detect_and_handle_locks.sh
+  # Confirms lock details for manual approval process
+
+# Call 3: terraform-apply (Final safety check)
+- name: Check for Stale Locks
+  run: ./detect_and_handle_locks.sh
+  # Last-chance protection before infrastructure changes
 ```
 
-#### **Database Recovery**
-If Aurora cluster is corrupted:
+**GitHub Environment Variables Set:**
+- `STALE_LOCKS_FOUND`: Controls approval workflow triggering
+- `ACTIVE_LOCKS_FOUND`: Blocks workflow if active operations detected
+- `LOCK_COUNT`: Used in approval summaries
+- `LOCK_IDS`: Passed to unlock script for validation
+- `LOCK_DETAILS`: Displayed in workflow summaries
+
+#### **3. `unlock_approved_locks.sh` - Called 1 Time**
+
+**Only executes after manual approval in GitHub environment:**
+
+```yaml
+# Job: stale-lock-approval (Conditional execution)
+- name: Unlock Approved Locks
+  run: ./unlock_approved_locks.sh
+  # Requires: LOCK_IDS environment variable from detect script
+  # Only runs: After human approval in GitHub environment
+```
+
+**Execution Flow:**
+```
+Stale Lock Detected → GitHub Environment Approval → Script Executes → Locks Removed
+```
+
+#### **4. `build_psycopg2_layer.sh` - Called 1 Time**
+
+**Lambda dependency compilation - runs once per workflow:**
+
+```yaml
+# Job: build-lambda (First job, no terraform interaction)
+- name: Build psycopg2 Layer
+  run: ./build_psycopg2_layer.sh
+  # Creates: psycopg2-layer.zip for Lambda functions
+  # Uploaded: As workflow artifact for later jobs
+```
+
+### **Terraform Configuration Integration**
+
+#### **Backend Configuration Auto-Generation**
+
+The terraform configuration **does NOT directly reference** the scripts, but depends on their output:
+
+**In `main.tf` (line 32):**
+```hcl
+# This file is auto-generated by setup_terraform_backend.sh
+```
+
+**Generated `backend-override.tf`:**
+```hcl
+terraform {
+  backend "s3" {
+    bucket         = "text2agent-terraform-state-eu-west-2"
+    key            = "text2agent/production/terraform.tfstate"
+    region         = "eu-west-2"
+    dynamodb_table = "text2agent-terraform-state-lock"
+    encrypt        = true
+  }
+}
+```
+
+#### **Script-to-Terraform Interaction Pattern**
+
+```
+┌─────────────────────┐    ┌─────────────────────┐    ┌─────────────────────┐
+│   GitHub Actions   │    │   Shell Scripts     │    │   Terraform Core   │
+│   Workflow Jobs    │───▶│   (Infrastructure)  │───▶│   (Configuration)   │
+└─────────────────────┘    └─────────────────────┘    └─────────────────────┘
+         │                            │                            │
+         │                            ▼                            │
+         │              ┌─────────────────────┐                    │
+         │              │   AWS Resources     │                    │
+         │              │   (S3, DynamoDB)    │◀───────────────────┘
+         │              └─────────────────────┘
+         │                            │
+         ▼                            ▼
+┌─────────────────────┐    ┌─────────────────────┐
+│   Workflow Control  │    │   State Locking     │
+│   (Job Dependencies)│    │   (Concurrency)     │
+└─────────────────────┘    └─────────────────────┘
+```
+
+### **Workflow Jobs & Lock Integration**
+
+#### **1. `build-lambda`**
+- **Scripts Called:** `build_psycopg2_layer.sh`
+- **Terraform Interaction:** None (pure build job)
+- **Output:** Lambda artifacts for deployment
+
+#### **2. `terraform-check`**
+- **Scripts Called:** `setup_terraform_backend.sh`
+- **Terraform Commands:** `init`, `validate`, `fmt -check`
+- **Purpose:** Syntax validation and backend initialization
+
+#### **3. `stale-lock-check`**
+- **Scripts Called:** `setup_terraform_backend.sh`, `detect_and_handle_locks.sh`
+- **Terraform Commands:** `init -reconfigure`
+- **Decision Point:** Determines workflow continuation
+
+#### **4. `stale-lock-approval` (conditional)**
+- **Scripts Called:** `setup_terraform_backend.sh`, `detect_and_handle_locks.sh`, `unlock_approved_locks.sh`
+- **Terraform Commands:** `init -reconfigure`
+- **Trigger Condition:** `stale_locks_found == 'true' && active_locks_found != 'true'`
+
+#### **5. `terraform-plan`**
+- **Scripts Called:** `setup_terraform_backend.sh`
+- **Terraform Commands:** `init`, `plan -out=tfplan`
+- **Dependencies:** Successful lock check completion
+
+#### **6. `terraform-apply`**
+- **Scripts Called:** `setup_terraform_backend.sh`, `detect_and_handle_locks.sh`
+- **Terraform Commands:** `init`, `apply -auto-approve tfplan`
+- **Protection:** Final lock check before infrastructure changes
+
+#### **7. `terraform-destroy` (conditional)**
+- **Scripts Called:** `setup_terraform_backend.sh`
+- **Terraform Commands:** `init`, `plan -destroy`, `apply destroy-plan`
+- **Trigger:** Manual workflow dispatch with `action == 'destroy'`
+
+### **Workflow Decision Tree**
+```
+Workflow Start
+     │
+     ▼
+┌─────────────┐
+│ Lock Check  │
+└─────────────┘
+     │
+     ▼
+┌─────────────┐    No Locks     ┌──────────────┐
+│   Result    │ ──────────────▶ │   Proceed    │
+│   Analysis  │                 │   Normally   │
+└─────────────┘                 └──────────────┘
+     │
+     │ Active Locks
+     ▼
+┌─────────────┐
+│    STOP     │
+│  Workflow   │
+└─────────────┘
+     │
+     │ Stale Locks  
+     ▼
+┌─────────────┐    Manual      ┌──────────────┐
+│  Approval   │ ──────────────▶│   Unlock &   │
+│  Required   │    Approval    │   Proceed    │
+└─────────────┘                └──────────────┘
+```
+
+## 🏗️ **Infrastructure Components**
+
+### **Core AWS Resources**
+
+#### **Networking**
+- **VPC:** Custom VPC with public and private subnets
+- **Availability Zones:** Multi-AZ deployment (eu-west-2a, eu-west-2b)
+- **Security Groups:** Least-privilege access controls
+- **NAT Gateway:** Secure internet access for private subnets
+
+#### **Database**
+- **Aurora Serverless V2:** PostgreSQL 15.4 with vector extension
+- **Auto-pause:** Configurable auto-pause after 15 minutes inactivity
+- **Scaling:** min_capacity=0, max_capacity=1 ACU
+- **Databases:** 
+  - `str_kb`: Bedrock Knowledge Base vector storage
+  - `text2Agent-Tenants`: User and tenant management
+
+#### **Authentication**
+- **Cognito User Pool:** User authentication and management
+- **Lambda Triggers:** Post-confirmation user processing
+- **Domain:** Custom authentication domain
+
+#### **AI & Search**
+- **Bedrock Knowledge Base:** Document indexing and vector search
+- **S3 Data Source:** Document storage and ingestion
+- **Titan Embeddings:** 1024-dimensional vector embeddings
+
+#### **Storage**
+- **S3 Bucket:** Document storage with encryption
+- **Versioning:** Enabled for data protection
+- **Lifecycle:** Automated data management
+
+## 🚨 **Troubleshooting**
+
+### **Common Lock Issues**
+
+#### **"Active Locks Detected" Error**
+```
+❌ ACTIVE LOCKS DETECTED - WORKFLOW BLOCKED
+```
+
+**Cause:** Another Terraform operation is currently running
+**Solution:**
+1. Check GitHub Actions for running workflows
+2. Wait for active operation to complete
+3. Re-run your workflow
+
+**Manual Check:**
 ```bash
-# 1. Create manual snapshot first
-aws rds create-db-cluster-snapshot \
-  --db-cluster-snapshot-identifier "manual-backup-$(date +%Y%m%d)" \
-  --db-cluster-identifier text2agent-dev-cluster \
+aws dynamodb scan \
+  --table-name text2agent-terraform-state-lock \
+  --region eu-west-2 \
+  --profile m3
+```
+
+#### **"Stale Locks Detected" - Approval Required**
+```
+❌ STALE LOCKS DETECTED - APPROVAL REQUIRED
+```
+
+**Cause:** Previous workflow failed/cancelled leaving stale lock
+**Solution:**
+1. Review lock details in workflow summary
+2. Verify no other operations running
+3. Approve lock removal in GitHub environment
+4. Workflow continues automatically
+
+#### **Lock Table Access Errors**
+```
+❌ DynamoDB table not accessible
+```
+
+**Causes & Solutions:**
+- **Missing Permissions:** Verify AWS profile `m3` has DynamoDB access
+- **Wrong Region:** Ensure using `eu-west-2`
+- **Table Missing:** Run `setup_terraform_backend.sh` to create table
+
+### **Backend Issues**
+
+#### **State File Corruption**
+If state becomes corrupted, restore from backup:
+```bash
+# List available backups
+aws s3 ls s3://text2agent-terraform-state-eu-west-2/backups/ --profile m3
+
+# Restore from backup
+aws s3 cp \
+  s3://text2agent-terraform-state-eu-west-2/backups/pre-apply-terraform.tfstate.TIMESTAMP \
+  s3://text2agent-terraform-state-eu-west-2/text2agent/production/terraform.tfstate \
+  --profile m3
+```
+
+#### **Backend Initialization Errors**
+```bash
+# Recreate backend configuration
+./setup_terraform_backend.sh
+
+# Force backend reconfiguration
+terraform init -reconfigure
+```
+
+## 🔧 **Manual Operations**
+
+### **Local Development**
+
+#### **Prerequisites**
+```bash
+# Required tools
+aws-cli (configured with profile 'm3')
+terraform v1.5.7
+docker (for Lambda layer builds)
+```
+
+#### **Setup Local Backend**
+```bash
+cd terraform
+./setup_terraform_backend.sh
+terraform init
+```
+
+#### **Check Infrastructure State**
+```bash
+# Check for locks before operations
+./detect_and_handle_locks.sh
+
+# Plan changes
+terraform plan -var="aws_region=eu-west-2" -var="aws_profile=m3"
+
+# Apply changes (use carefully)
+terraform apply -var="aws_region=eu-west-2" -var="aws_profile=m3"
+```
+
+### **Testing Lock System**
+
+#### **Test Lock Detection**
+```bash
+# Should return success (exit 0) when no locks
+./detect_and_handle_locks.sh
+echo $?  # Should print 0
+
+# Create test lock to verify detection
+aws dynamodb put-item \
+  --table-name text2agent-terraform-state-lock \
+  --item '{"LockID":{"S":"test-lock"},"Info":{"S":"{\"ID\":\"test123\",\"Who\":\"manual-test\"}"}}' \
+  --region eu-west-2 \
   --profile m3
 
-# 2. Then recreate with Terraform
-terraform destroy -target=module.database -var="aws_profile=m3"
-terraform apply -target=module.database -var="aws_profile=m3"
+# Should detect the test lock
+./detect_and_handle_locks.sh
+
+# Clean up test lock
+aws dynamodb delete-item \
+  --table-name text2agent-terraform-state-lock \
+  --key '{"LockID":{"S":"test-lock"}}' \
+  --region eu-west-2 \
+  --profile m3
 ```
 
-## Making Changes
-
-### Safe Changes (Updates in-place)
-- Adding tags to resources
-- Modifying Lambda function code
-- Updating IAM policies
-- Adding new modules
-
-### Dangerous Changes (Forces recreation)
-- Changing VPC CIDR blocks
-- Changing Aurora cluster identifier
-- Modifying database names
-
-**Always run `terraform plan` first to see what will change!**
-
-## Operational Best Practices
-
-### Development Workflow
-```bash
-# 1. Always plan first
-terraform plan -var="aws_profile=m3" -out=plan.out
-
-# 2. Review the plan carefully
-terraform show plan.out
-
-# 3. Apply the saved plan
-terraform apply plan.out
-
-# 4. Clean up plan file
-rm plan.out
 ```
 
-### Production Deployment
-```bash
-# 1. Use workspaces for environment separation
-terraform workspace new production
-terraform workspace select production
+### **Development Workflow**
+1. Make changes to `.tf` files
+2. Test locally: `terraform plan`
+3. Commit and push to trigger GitHub Actions
+4. Monitor workflow execution
+5. Review deployment results
 
-# 2. Use separate terraform.tfvars for each environment
-terraform apply -var-file="production.tfvars"
-
-# 3. Enable state locking with DynamoDB
-# (already configured in backend.tf)
-
-# 4. Use versioned modules
-module "database" {
-  source = "./modules/database"
-  version = "v1.0.0"  # Pin to specific version
-}
-```# Test Lock Demo - Push 1
-# Test Lock Demo - Push 2
+The infrastructure is now protected against concurrent modifications and ready for production use! 🎉

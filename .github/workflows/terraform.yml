@@ -278,7 +278,7 @@ jobs:
   terraform-plan:
     name: 'Terraform Plan'
     needs: [stale-lock-check, stale-lock-approval]
-    if: always() && (needs.stale-lock-check.result == 'success') && (needs.stale-lock-check.outputs.active_locks_found != 'true') && (needs.stale-lock-approval.result == 'success' || needs.stale-lock-approval.result == 'skipped')
+    if: github.event.inputs.action != 'destroy' && always() && (needs.stale-lock-check.result == 'success') && (needs.stale-lock-check.outputs.active_locks_found != 'true') && (needs.stale-lock-approval.result == 'success' || needs.stale-lock-approval.result == 'skipped')
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -351,7 +351,7 @@ jobs:
     name: 'Terraform Apply'
     needs: [terraform-check, terraform-plan, stale-lock-check, stale-lock-approval]
     runs-on: ubuntu-latest
-    if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feature/IAC') && (github.event_name == 'push' || github.event.inputs.action == 'apply') && always() && (needs.stale-lock-check.result == 'success') && (needs.stale-lock-check.outputs.active_locks_found != 'true') && (needs.stale-lock-approval.result == 'success' || needs.stale-lock-approval.result == 'skipped')
+    if: github.event.inputs.action != 'destroy' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feature/IAC') && (github.event_name == 'push' || github.event.inputs.action == 'apply') && always() && (needs.stale-lock-check.result == 'success') && (needs.stale-lock-check.outputs.active_locks_found != 'true') && (needs.stale-lock-approval.result == 'success' || needs.stale-lock-approval.result == 'skipped')
     defaults:
       run:
         working-directory: ./terraform
