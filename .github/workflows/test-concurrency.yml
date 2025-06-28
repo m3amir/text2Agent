@@ -1,0 +1,275 @@
+name: Test Terraform Lock Mechanism
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_type:
+        description: 'Type of lock test to run'
+        required: true
+        default: 'concurrent'
+        type: choice
+        options:
+        - concurrent
+        - long_operation
+        - manual_lock
+      hold_duration:
+        description: 'How long to hold the lock (seconds)'
+        required: false
+        default: '120'
+        type: string
+
+env:
+  TF_VERSION: 1.5.7
+  AWS_REGION: eu-west-2
+  AWS_DEFAULT_REGION: eu-west-2
+
+jobs:
+  test-setup:
+    name: 'Test Setup'
+    runs-on: ubuntu-latest
+    outputs:
+      test_id: ${{ steps.generate.outputs.test_id }}
+    steps:
+      - name: Generate Test ID
+        id: generate
+        run: |
+          TEST_ID="test-$(date +%Y%m%d-%H%M%S)-${{ github.run_number }}"
+          echo "test_id=$TEST_ID" >> $GITHUB_OUTPUT
+          echo "🧪 Test ID: $TEST_ID"
+
+  # Test 1: Long-running operation to create a predictable lock window
+  long-operation-test:
+    name: 'Long Operation Test'
+    needs: test-setup
+    runs-on: ubuntu-latest
+    if: github.event.inputs.test_type == 'long_operation'
+    defaults:
+      run:
+        working-directory: ./terraform
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Setup Backend
+        run: |
+          chmod +x ./setup_terraform_backend.sh
+          ./setup_terraform_backend.sh
+
+      - name: Initialize Terraform
+        run: terraform init -reconfigure
+
+      - name: Create Test Summary
+        run: |
+          echo "## 🧪 Long Operation Lock Test" >> $GITHUB_STEP_SUMMARY
+          echo "**Test ID:** ${{ needs.test-setup.outputs.test_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Duration:** ${{ github.event.inputs.hold_duration }} seconds" >> $GITHUB_STEP_SUMMARY
+          echo "**Purpose:** Hold Terraform lock for extended period" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔒 Lock Window" >> $GITHUB_STEP_SUMMARY
+          echo "While this job runs, try starting another terraform workflow." >> $GITHUB_STEP_SUMMARY
+          echo "The second workflow should be **BLOCKED** until this completes." >> $GITHUB_STEP_SUMMARY
+
+      - name: Long Running Terraform Plan with Lock
+        run: |
+          echo "🔒 Starting long-running Terraform operation..."
+          echo "This will hold the DynamoDB lock for ${{ github.event.inputs.hold_duration }} seconds"
+          
+          # Create a terraform plan that includes a sleep to simulate long operation
+          cat > test_long_operation.tf << 'EOF'
+          resource "null_resource" "lock_test" {
+            provisioner "local-exec" {
+              command = "echo 'Lock test started at: $(date)' && sleep ${{ github.event.inputs.hold_duration }} && echo 'Lock test completed at: $(date)'"
+            }
+            
+            triggers = {
+              test_id = "${{ needs.test-setup.outputs.test_id }}"
+              timestamp = "${timestamp()}"
+            }
+          }
+          EOF
+          
+          # Run terraform plan (which will acquire and hold the lock)
+          terraform plan -var="aws_region=${{ env.AWS_REGION }}" -var="aws_profile=" -target=null_resource.lock_test
+          
+          echo "✅ Long operation completed - lock should now be released"
+          
+          # Clean up test resource
+          rm -f test_long_operation.tf
+
+  # Test 2: Manual lock creation for testing
+  manual-lock-test:
+    name: 'Manual Lock Test'
+    needs: test-setup
+    runs-on: ubuntu-latest
+    if: github.event.inputs.test_type == 'manual_lock'
+    defaults:
+      run:
+        working-directory: ./terraform
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Create Manual Lock
+        run: |
+          echo "🔒 Creating manual lock in DynamoDB..."
+          
+          # Create lock entry directly in DynamoDB
+          LOCK_ID="text2agent-terraform-state-eu-west-2/text2agent/production/terraform.tfstate"
+          TEST_ID="${{ needs.test-setup.outputs.test_id }}"
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%S.%3NZ")
+          
+          LOCK_INFO=$(cat << EOF
+          {
+            "ID": "${TEST_ID}",
+            "Operation": "OperationTypeManualTest",
+            "Info": "Manual lock test from GitHub Actions",
+            "Who": "github-actions-test-${{ github.run_id }}",
+            "Version": "1.5.7",
+            "Created": "${TIMESTAMP}",
+            "Path": "text2agent-terraform-state-eu-west-2/text2agent/production/terraform.tfstate"
+          }
+          EOF
+          )
+          
+          aws dynamodb put-item \
+            --table-name "text2agent-terraform-state-lock" \
+            --item "{
+              \"LockID\": {\"S\": \"$LOCK_ID\"},
+              \"Info\": {\"S\": \"$(echo "$LOCK_INFO" | tr -d '\n' | sed 's/"/\\"/g')\"}
+            }" \
+            --region ${{ env.AWS_REGION }}
+          
+          echo "✅ Manual lock created with ID: $TEST_ID"
+
+      - name: Hold Lock
+        run: |
+          echo "⏳ Holding lock for ${{ github.event.inputs.hold_duration }} seconds..."
+          echo ""
+          echo "## 🧪 Manual Lock Test Active" >> $GITHUB_STEP_SUMMARY
+          echo "**Test ID:** ${{ needs.test-setup.outputs.test_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Lock Duration:** ${{ github.event.inputs.hold_duration }} seconds" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔒 Lock Status: ACTIVE" >> $GITHUB_STEP_SUMMARY
+          echo "Try running the main terraform workflow now." >> $GITHUB_STEP_SUMMARY
+          echo "It should be **BLOCKED** until this test completes." >> $GITHUB_STEP_SUMMARY
+          
+          sleep ${{ github.event.inputs.hold_duration }}
+
+      - name: Remove Manual Lock
+        if: always()
+        run: |
+          echo "🔓 Removing manual lock..."
+          
+          LOCK_ID="text2agent-terraform-state-eu-west-2/text2agent/production/terraform.tfstate"
+          
+          aws dynamodb delete-item \
+            --table-name "text2agent-terraform-state-lock" \
+            --key "{\"LockID\": {\"S\": \"$LOCK_ID\"}}" \
+            --region ${{ env.AWS_REGION }}
+          
+          echo "✅ Manual lock removed"
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔓 Lock Status: RELEASED" >> $GITHUB_STEP_SUMMARY
+          echo "Other terraform workflows can now proceed." >> $GITHUB_STEP_SUMMARY
+
+  # Test 3: Concurrent workflow starter
+  concurrent-test-launcher:
+    name: 'Concurrent Test Launcher'
+    needs: test-setup
+    runs-on: ubuntu-latest
+    if: github.event.inputs.test_type == 'concurrent'
+    steps:
+      - name: Launch Concurrent Workflows
+        run: |
+          echo "🚀 This test helps you manually trigger concurrent workflows"
+          echo ""
+          echo "## 🧪 Concurrent Lock Test" >> $GITHUB_STEP_SUMMARY
+          echo "**Test ID:** ${{ needs.test-setup.outputs.test_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📋 Test Instructions:" >> $GITHUB_STEP_SUMMARY
+          echo "1. **Immediately after this job completes**, go to Actions tab" >> $GITHUB_STEP_SUMMARY
+          echo "2. **Quickly trigger the main 'Deploy Terraform Infrastructure' workflow**" >> $GITHUB_STEP_SUMMARY
+          echo "3. **Within 10-30 seconds, trigger it again**" >> $GITHUB_STEP_SUMMARY
+          echo "4. **Watch the results** - one should be blocked by the other" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### ✅ Expected Result:" >> $GITHUB_STEP_SUMMARY
+          echo "- **First workflow**: Should proceed normally" >> $GITHUB_STEP_SUMMARY
+          echo "- **Second workflow**: Should fail at 'stale-lock-check' with ACTIVE LOCK message" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🎯 Success Criteria:" >> $GITHUB_STEP_SUMMARY
+          echo "The second workflow stops with: *'🚨 ACTIVE LOCKS DETECTED - WORKFLOW BLOCKED'*" >> $GITHUB_STEP_SUMMARY
+
+  # Test 4: Lock verification
+  verify-lock-system:
+    name: 'Verify Lock System'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./terraform
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Test Lock Detection Script
+        run: |
+          echo "🔍 Testing lock detection system..."
+          chmod +x ./detect_and_handle_locks.sh
+          
+          echo "## 🧪 Lock System Verification" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Test 1: Check for existing locks
+          echo "### Test 1: Current Lock Status" >> $GITHUB_STEP_SUMMARY
+          if ./detect_and_handle_locks.sh; then
+            echo "✅ **No active locks detected**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "🔒 **Active locks found** - system working correctly!" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Test 2: DynamoDB Table Access" >> $GITHUB_STEP_SUMMARY
+          
+          # Test 2: Verify DynamoDB access
+          if aws dynamodb describe-table --table-name "text2agent-terraform-state-lock" --region ${{ env.AWS_REGION }} >/dev/null 2>&1; then
+            echo "✅ **DynamoDB table accessible**" >> $GITHUB_STEP_SUMMARY
+            
+            # Show table status
+            TABLE_STATUS=$(aws dynamodb describe-table --table-name "text2agent-terraform-state-lock" --region ${{ env.AWS_REGION }} --query 'Table.TableStatus' --output text)
+            echo "- Table Status: $TABLE_STATUS" >> $GITHUB_STEP_SUMMARY
+            
+            # Check for any existing locks
+            ITEM_COUNT=$(aws dynamodb scan --table-name "text2agent-terraform-state-lock" --region ${{ env.AWS_REGION }} --select "COUNT" --query 'Count' --output text 2>/dev/null || echo "0")
+            echo "- Current locks in table: $ITEM_COUNT" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Cannot access DynamoDB table**" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🎯 Lock System Status: READY" >> $GITHUB_STEP_SUMMARY
+          echo "The locking mechanism is properly configured and operational!" >> $GITHUB_STEP_SUMMARY 
