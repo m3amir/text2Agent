@@ -152,6 +152,11 @@ jobs:
           chmod +x ./setup_terraform_backend.sh
           ./setup_terraform_backend.sh
 
+      - name: Initialize Terraform Backend
+        run: |
+          echo "Initializing Terraform with backend configuration..."
+          terraform init -reconfigure
+
       - name: Check for Stale Locks
         id: check_locks
         run: |
