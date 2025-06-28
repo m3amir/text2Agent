@@ -8,23 +8,15 @@ DYNAMODB_TABLE="text2agent-terraform-state-lock"
 REGION="eu-west-2"
 BACKEND_CONFIG_FILE="backend-override.tf"
 
-echo "🚀 Setting up Terraform S3 backend with DynamoDB locking..."
-echo "=========================================================="
-echo "S3 Bucket: $BUCKET_NAME"
-echo "DynamoDB Table: $DYNAMODB_TABLE"
-echo "Region: $REGION"
-echo "Lock Method: DynamoDB-based locking"
-echo ""
+echo "Setting up Terraform S3 backend with DynamoDB locking..."
 
 # =====================================
 # STEP 1: Setup S3 Bucket
 # =====================================
-echo "1️⃣ Setting up S3 bucket for state storage..."
+echo "Setting up S3 bucket for state storage..."
 
 # Check if bucket already exists
 if ! aws s3api head-bucket --bucket "$BUCKET_NAME" --region "$REGION" 2>/dev/null; then
-    echo "📦 Creating S3 bucket: $BUCKET_NAME"
-    
     # Create the bucket
     aws s3api create-bucket \
         --bucket "$BUCKET_NAME" \
@@ -39,7 +31,6 @@ if ! aws s3api head-bucket --bucket "$BUCKET_NAME" --region "$REGION" 2>/dev/nul
     fi
 
     # Configure bucket
-    echo "🔧 Configuring bucket settings..."
     aws s3api put-bucket-versioning \
         --bucket "$BUCKET_NAME" \
         --versioning-configuration Status=Enabled
@@ -67,13 +58,10 @@ fi
 # =====================================
 # STEP 2: Setup DynamoDB Lock Table
 # =====================================
-echo ""
-echo "2️⃣ Setting up DynamoDB table for state locking..."
+echo "Setting up DynamoDB table for state locking..."
 
 # Check if DynamoDB table already exists
 if ! aws dynamodb describe-table --table-name "$DYNAMODB_TABLE" --region "$REGION" >/dev/null 2>&1; then
-    echo "📋 Creating DynamoDB table: $DYNAMODB_TABLE"
-    
     # Create the DynamoDB table
     aws dynamodb create-table \
         --table-name "$DYNAMODB_TABLE" \
@@ -86,7 +74,6 @@ if ! aws dynamodb describe-table --table-name "$DYNAMODB_TABLE" --region "$REGIO
         echo "✅ DynamoDB table created successfully"
         
         # Wait for table to become active
-        echo "⏳ Waiting for DynamoDB table to become active..."
         aws dynamodb wait table-exists --table-name "$DYNAMODB_TABLE" --region "$REGION"
         echo "✅ DynamoDB table is now active"
     else
@@ -100,8 +87,7 @@ fi
 # =====================================
 # STEP 3: Verify Permissions
 # =====================================
-echo ""
-echo "3️⃣ Verifying AWS permissions..."
+echo "Verifying AWS permissions..."
 
 # Test S3 permissions
 if aws s3 ls "s3://$BUCKET_NAME" --region "$REGION" >/dev/null 2>&1; then
@@ -122,8 +108,7 @@ fi
 # =====================================
 # STEP 4: Configure Backend with DynamoDB Locking
 # =====================================
-echo ""
-echo "4️⃣ Configuring Terraform backend with DynamoDB locking..."
+echo "Configuring Terraform backend with DynamoDB locking..."
 
 # Create backend override file with DynamoDB locking
 cat > "$BACKEND_CONFIG_FILE" << EOF
@@ -145,34 +130,4 @@ terraform {
 EOF
 
 echo "✅ Backend configuration updated with DynamoDB locking"
-
-# =====================================
-# SUMMARY
-# =====================================
-echo ""
-echo "🎉 Terraform Backend Setup Complete!"
-echo "===================================="
-echo ""
-echo "📋 Configuration Summary:"
-echo "   ✅ S3 Bucket: $BUCKET_NAME"
-echo "   ✅ DynamoDB Table: $DYNAMODB_TABLE"
-echo "   ✅ Region: $REGION"
-echo "   ✅ State Locking: DynamoDB-based"
-echo "   ✅ Encryption: ENABLED"
-echo "   ✅ Versioning: ENABLED"
-echo "   💰 Cost: S3 storage + DynamoDB (~\$0.30-0.50/month)"
-echo ""
-echo "🔐 DynamoDB Locking Benefits:"
-echo "   - ✅ Proven, stable locking method"
-echo "   - ✅ Compatible with Terraform v1.5.7"
-echo "   - ✅ Reliable concurrent operation prevention"
-echo "   - ✅ Widely supported and documented"
-echo ""
-echo "📁 State Location:"
-echo "   s3://$BUCKET_NAME/text2agent/production/terraform.tfstate"
-echo ""
-echo "🔒 Lock Table:"
-echo "   DynamoDB table: $DYNAMODB_TABLE"
-echo "   LockID: text2agent-terraform-state-eu-west-2/text2agent/production/terraform.tfstate"
-echo ""
-echo "🚀 Ready for Terraform operations with proven concurrent protection!" 
+echo "✅ Terraform backend setup complete" 

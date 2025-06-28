@@ -12,40 +12,19 @@ STATE_PATH="text2agent-terraform-state-eu-west-2/text2agent/production/terraform
 REGION="eu-west-2"
 STALE_THRESHOLD_MINUTES=30  # Consider locks older than 30 minutes as potentially stale
 
-echo "🔍 Checking for active Terraform DynamoDB locks..."
-echo "==============================================="
+echo "Checking for active Terraform locks..."
 
-# Debug information
-echo ""
-echo "🔧 Debug Information:"
-echo "   DynamoDB Table: $DYNAMODB_TABLE"
-echo "   State Path: $STATE_PATH"
-echo "   Region: $REGION"
-echo "   AWS CLI Version: $(aws --version 2>/dev/null || echo 'Not installed')"
-echo "   Current AWS Identity:"
-aws sts get-caller-identity 2>/dev/null || echo "   ❌ Failed to get AWS identity"
-
-echo ""
-echo "🔍 Testing DynamoDB Access:"
-echo "   Checking if table exists..."
-if aws dynamodb describe-table --table-name "$DYNAMODB_TABLE" --region "$REGION" >/dev/null 2>&1; then
-    echo "   ✅ Table exists and accessible"
-else
-    echo "   ❌ Table not accessible - this could be the problem!"
-    echo "   Error details:"
+# Test DynamoDB access
+if ! aws dynamodb describe-table --table-name "$DYNAMODB_TABLE" --region "$REGION" >/dev/null 2>&1; then
+    echo "❌ DynamoDB table not accessible"
     aws dynamodb describe-table --table-name "$DYNAMODB_TABLE" --region "$REGION" 2>&1 || true
+    exit 1
 fi
-
-echo ""
-echo "🔍 Checking for Active Lock Entry:"
-echo "   Looking for lock ID: $STATE_PATH"
 
 # Check if lock entry exists in DynamoDB
 LOCK_EXISTS=false
 LOCK_CONTENT=""
-LOCK_CREATED=""
 
-# Query DynamoDB for lock entry
 LOCK_ITEM=$(aws dynamodb get-item \
     --table-name "$DYNAMODB_TABLE" \
     --key "{\"LockID\":{\"S\":\"$STATE_PATH\"}}" \
@@ -54,24 +33,19 @@ LOCK_ITEM=$(aws dynamodb get-item \
 
 if echo "$LOCK_ITEM" | grep -q "Item"; then
     LOCK_EXISTS=true
-    echo "   🔒 Lock entry found in DynamoDB!"
     
     # Extract lock information from DynamoDB item
     LOCK_INFO=$(echo "$LOCK_ITEM" | jq -r '.Item.Info.S // ""' 2>/dev/null || echo "")
     
     if [ -n "$LOCK_INFO" ]; then
-        echo "   ✅ Lock info retrieved"
         LOCK_CONTENT="$LOCK_INFO"
-        echo ""
-        echo "🔍 Lock Entry Contents:"
-        echo "$LOCK_CONTENT" | jq '.' 2>/dev/null || echo "$LOCK_CONTENT"
     else
-        echo "   ❌ Failed to read lock info from DynamoDB item"
-        echo "   Raw item:"
+        echo "❌ Failed to read lock info from DynamoDB item"
         echo "$LOCK_ITEM"
+        exit 1
     fi
 else
-    echo "   ✅ No lock entry found - all clear!"
+    echo "✅ No lock entry found - all clear"
 fi
 
 # Function to calculate lock age in minutes
@@ -80,11 +54,10 @@ calculate_lock_age() {
     local current_time=$(date -u +%s)
     
     if [ "$created_timestamp" = "unknown" ] || [ -z "$created_timestamp" ]; then
-        echo 999  # Unknown age, treat as very old
+        echo 999
         return
     fi
     
-    # Parse the created timestamp
     local lock_time_seconds
     if command -v python3 &> /dev/null; then
         lock_time_seconds=$(python3 -c "
@@ -93,11 +66,9 @@ from datetime import datetime
 try:
     created = '$created_timestamp'
     if created and created != 'unknown':
-        # Handle different timestamp formats
         if 'T' in created and 'Z' in created:
             dt = datetime.fromisoformat(created.replace('Z', '+00:00'))
         else:
-            # Try parsing as ISO format
             dt = datetime.fromisoformat(created)
         print(int(dt.timestamp()))
     else:
@@ -114,25 +85,20 @@ except Exception as e:
         local age_minutes=$((age_seconds / 60))
         echo $age_minutes
     else
-        echo 999  # Unknown age, treat as very old
+        echo 999
     fi
 }
 
 # Function to check if a GitHub Actions workflow is still running
 check_workflow_status() {
     local lock_content=$1
-    
-    # Extract workflow run ID from lock content if it contains GitHub Actions info
     local who=$(echo "$lock_content" | jq -r '.Who // ""' 2>/dev/null || echo "")
     
     if [[ "$who" =~ github-actions.*run-([0-9]+) ]] || [[ "$who" =~ runner.*([0-9]{10}) ]]; then
         local run_id="${BASH_REMATCH[1]}"
-        echo "🔍 Checking GitHub Actions run $run_id status..."
         
-        # Check if workflow is still running (requires GitHub CLI or API)
         if command -v gh &> /dev/null && [ -n "$GITHUB_TOKEN" ]; then
             local status=$(gh run view $run_id --json status --jq '.status' 2>/dev/null || echo "unknown")
-            echo "   Status: $status"
             if [ "$status" = "in_progress" ] || [ "$status" = "queued" ]; then
                 return 0  # Active workflow
             fi
@@ -144,9 +110,6 @@ check_workflow_status() {
 
 # Process lock if it exists
 if [ "$LOCK_EXISTS" = "true" ]; then
-    echo ""
-    echo "🔍 Analyzing Lock:"
-    
     # Extract lock information from JSON content
     LOCK_ID=$(echo "$LOCK_CONTENT" | jq -r '.ID // "unknown"' 2>/dev/null || echo "unknown")
     OPERATION=$(echo "$LOCK_CONTENT" | jq -r '.Operation // "unknown"' 2>/dev/null || echo "unknown")
@@ -156,13 +119,6 @@ if [ "$LOCK_EXISTS" = "true" ]; then
     
     # Calculate lock age using created timestamp
     LOCK_AGE_MINUTES=$(calculate_lock_age "$CREATED")
-    
-    echo "   Lock ID: ${LOCK_ID:0:12}..."
-    echo "   Operation: $OPERATION"
-    echo "   Who: $WHO"
-    echo "   Created: $CREATED"
-    echo "   Version: $VERSION"
-    echo "   Age: $LOCK_AGE_MINUTES minutes"
     
     # Determine if lock is stale or active
     IS_STALE=false
@@ -189,18 +145,15 @@ if [ "$LOCK_EXISTS" = "true" ]; then
         STALE_REASON="Cannot verify active workflow for ${LOCK_AGE_MINUTES} min old lock"
     fi
     
-    echo ""
     if [ "$IS_STALE" = "true" ]; then
-        echo "🚨 STALE LOCK DETECTED"
-        echo "   Reason: $STALE_REASON"
+        echo "❌ STALE LOCK DETECTED"
+        echo "Reason: $STALE_REASON"
         
         # Export stale lock data to GitHub environment
         if [ -n "$GITHUB_ENV" ]; then
             echo "STALE_LOCKS_FOUND=true" >> $GITHUB_ENV
             echo "LOCK_COUNT=1" >> $GITHUB_ENV
             echo "LOCK_IDS=$LOCK_ID" >> $GITHUB_ENV
-        else
-            echo "   (Local execution - GitHub environment variables not set)"
         fi
         
         if [ -n "$GITHUB_ENV" ]; then
@@ -215,18 +168,13 @@ if [ "$LOCK_EXISTS" = "true" ]; then
                 echo "- **Who:** ${WHO}"
                 echo "- **Version:** ${VERSION}"
                 echo "- **Reason:** ${STALE_REASON}"
-                echo "- **DynamoDB Table:** ${DYNAMODB_TABLE}"
-                echo "- **Lock Key:** ${STATE_PATH}"
                 echo "EOF"
             } >> $GITHUB_ENV
         fi
         
-        echo ""
-        echo "🔄 Workflow will now pause for manual approval to remove stale lock..."
-        
     else
-        echo "🚨 ACTIVE LOCK DETECTED - WORKFLOW MUST STOP"
-        echo "   Status: $STALE_REASON"
+        echo "❌ ACTIVE LOCK DETECTED - WORKFLOW MUST STOP"
+        echo "Status: $STALE_REASON"
         
         # Set GitHub environment to indicate active locks found
         if [ -n "$GITHUB_ENV" ]; then
@@ -244,28 +192,20 @@ if [ "$LOCK_EXISTS" = "true" ]; then
                 echo "- **Who:** ${WHO}"
                 echo "- **Version:** ${VERSION}"
                 echo "- **Status:** ${STALE_REASON}"
-                echo "- **DynamoDB Table:** ${DYNAMODB_TABLE}"
-                echo "- **Lock Key:** ${STATE_PATH}"
                 echo "EOF"
             } >> $GITHUB_ENV
-        else
-            echo "   (Local execution - GitHub environment variables not set)"
         fi
         
-        echo ""
-        echo "❌ Exiting to prevent interference with active Terraform operations."
-        echo "   This workflow will need to be re-run after the active operation completes."
-        
-        exit 1  # Exit with error to stop the workflow
+        exit 1
     fi
 else
-    echo ""
-    echo "✅ No active locks found - all clear!"
+    # No locks found - set GitHub environment variables for success case
     if [ -n "$GITHUB_ENV" ]; then
         echo "STALE_LOCKS_FOUND=false" >> $GITHUB_ENV
         echo "ACTIVE_LOCKS_FOUND=false" >> $GITHUB_ENV
+        echo "LOCK_COUNT=0" >> $GITHUB_ENV
+        echo "LOCK_IDS=" >> $GITHUB_ENV
     fi
-fi
-
-echo ""
-echo "📊 DynamoDB Lock Analysis Complete" 
+    
+    exit 0
+fi 
