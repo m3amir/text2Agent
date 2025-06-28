@@ -30,9 +30,11 @@ terraform {
   }
 
   backend "s3" {
-    bucket = "text2agent-terraform-state-eu-west-2"
-    key    = "text2agent/production/terraform.tfstate"
-    region = "eu-west-2"
+    bucket  = "text2agent-terraform-state-eu-west-2"
+    key     = "text2agent/production/terraform.tfstate"
+    region  = "eu-west-2"
+    encrypt = true
+    # DynamoDB locking will be added via backend-override.tf when available
   }
 }
 
