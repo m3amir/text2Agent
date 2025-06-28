@@ -98,8 +98,9 @@ resource "aws_rds_cluster" "main" {
   enable_http_endpoint = true
 
   serverlessv2_scaling_configuration {
-    max_capacity = 2
-    min_capacity = 0
+    max_capacity             = 2
+    min_capacity             = 0
+    seconds_until_auto_pause = 900  # 15 minutes auto-pause timeout
   }
 
   tags = {
@@ -160,195 +161,304 @@ resource "null_resource" "db_schema_init" {
     force_recreate = "2025-01-01-hnsw-fix"
   }
 
-  # Wait for the database to be ready - longer wait for GitHub Actions
+  # Wait for the database to be ready - intelligent polling instead of fixed wait
   provisioner "local-exec" {
     command = <<-EOF
-      echo "Waiting for database to be fully ready..."
-      if [ "$GITHUB_ACTIONS" = "true" ]; then
-        echo "Running in GitHub Actions - using extended wait time"
-        sleep 300  # 5 minutes for GitHub Actions
-      else
-        echo "Running locally - using standard wait time"
-        sleep 120  # 2 minutes for local
-      fi
+      echo "🔍 Checking database readiness..."
+      
+      # Smart wait - check every 30 seconds, max 5 minutes
+      MAX_ATTEMPTS=10  # 10 attempts * 30 seconds = 5 minutes max
+      ATTEMPT=0
+      
+      while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+        ATTEMPT=$((ATTEMPT + 1))
+        echo "⏱️  Attempt $ATTEMPT/$MAX_ATTEMPTS - Testing database connectivity..."
+        
+        # Test if we can connect and run a simple query
+        if aws rds-data execute-statement \
+          --resource-arn "${aws_rds_cluster.main.arn}" \
+          --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
+          --database "${aws_rds_cluster.main.database_name}" \
+          --sql 'SELECT 1;' \
+          --region ${var.aws_region} \
+          --output text >/dev/null 2>&1; then
+          
+          echo "✅ Database is ready! (took $((ATTEMPT * 30)) seconds)"
+          break
+        else
+          if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
+            echo "❌ Database not ready after $((MAX_ATTEMPTS * 30)) seconds"
+            exit 1
+          else
+            echo "⏳ Database not ready yet, waiting 30 seconds..."
+            sleep 30
+          fi
+        fi
+      done
     EOF
   }
 
   # Initialize TWO separate databases using AWS CLI and RDS Data API
   provisioner "local-exec" {
     command = <<-EOF
+      # Function to retry AWS RDS commands with resume handling
+      retry_rds_command() {
+        local max_attempts=8  # Increased for auto-pause scenarios
+        local attempt=1
+        local wait_time=30
+        local description="$1"
+        local command="$2"
+        
+        while [ $attempt -le $max_attempts ]; do
+          echo "🔄 Attempt $attempt/$max_attempts: $description"
+          
+          # Capture both stdout and stderr for better error detection
+          local output
+          local exit_code
+          output=$(eval "$command" 2>&1)
+          exit_code=$?
+          
+          if [ $exit_code -eq 0 ]; then
+            echo "✅ Success: $description"
+            return 0
+          else
+            # Check for database resuming exceptions in the output
+            if echo "$output" | grep -qi "DatabaseResumingException\|resuming\|auto-pause"; then
+              echo "⏳ Database resuming from auto-pause, waiting ${wait_time}s..."
+              echo "   Error details: $(echo "$output" | head -n 2)"
+              sleep $wait_time
+              # Increase wait time for subsequent attempts (auto-pause can take time)
+              wait_time=$((wait_time + 20))
+            elif echo "$output" | grep -qi "already exists\|duplicate\|unique constraint"; then
+              echo "ℹ️  Resource already exists: $description"
+              return 0  # Treat as success for idempotent operations
+            else
+              echo "⚠️  Command failed (non-resume error): $description"
+              echo "   Error details: $(echo "$output" | head -n 3)"
+              return 1
+            fi
+          fi
+          
+          attempt=$((attempt + 1))
+        done
+        
+        echo "❌ Failed after $max_attempts attempts: $description"
+        return 1
+      }
+      
       # =================================================================
       # STEP 1: Create the second database (text2AgentTenants)
       # =================================================================
-      echo "Creating text2AgentTenants database..."
-      aws rds-data execute-statement \
-        --resource-arn "${aws_rds_cluster.main.arn}" \
-        --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
-        --database "${aws_rds_cluster.main.database_name}" \
-        --sql 'CREATE DATABASE "text2AgentTenants";' \
-        --region ${var.aws_region}
+      echo "📊 Creating text2AgentTenants database..."
+      retry_rds_command "Create text2AgentTenants database" \
+        "aws rds-data execute-statement \
+          --resource-arn '${aws_rds_cluster.main.arn}' \
+          --secret-arn '${aws_secretsmanager_secret.db_credentials.arn}' \
+          --database '${aws_rds_cluster.main.database_name}' \
+          --sql 'CREATE DATABASE \"text2AgentTenants\";' \
+          --region ${var.aws_region} \
+          --output text >/dev/null 2>&1"
 
       # =================================================================
       # STEP 2: Initialize str_kb database (Bedrock Knowledge Base)
       # =================================================================
-      echo "Setting up str_kb database for Bedrock..."
+      echo "🧠 Setting up str_kb database for Bedrock..."
+      
       # Enable pgvector extension (version 0.5.0+ required for HNSW)
-      echo "Creating vector extension..."
-      aws rds-data execute-statement \
-        --resource-arn "${aws_rds_cluster.main.arn}" \
-        --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
-        --database "${aws_rds_cluster.main.database_name}" \
-        --sql 'CREATE EXTENSION IF NOT EXISTS vector;' \
-        --region ${var.aws_region} || echo "Extension creation failed or already exists"
+      echo "🔌 Creating vector extension..."
+      retry_rds_command "Create vector extension" \
+        "aws rds-data execute-statement \
+          --resource-arn '${aws_rds_cluster.main.arn}' \
+          --secret-arn '${aws_secretsmanager_secret.db_credentials.arn}' \
+          --database '${aws_rds_cluster.main.database_name}' \
+          --sql 'CREATE EXTENSION IF NOT EXISTS vector;' \
+          --region ${var.aws_region} \
+          --output text >/dev/null 2>&1"
 
       # Verify pgvector version (must be 0.5.0+ for HNSW support)
-      echo "Checking pgvector version..."
-      aws rds-data execute-statement \
-        --resource-arn "${aws_rds_cluster.main.arn}" \
-        --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
-        --database "${aws_rds_cluster.main.database_name}" \
-        --sql "SELECT extname, extversion FROM pg_extension WHERE extname='vector';" \
-        --region ${var.aws_region} || echo "Could not verify vector extension version"
+      echo "🔍 Checking pgvector version..."
+      retry_rds_command "Check pgvector version" \
+        "aws rds-data execute-statement \
+          --resource-arn '${aws_rds_cluster.main.arn}' \
+          --secret-arn '${aws_secretsmanager_secret.db_credentials.arn}' \
+          --database '${aws_rds_cluster.main.database_name}' \
+          --sql 'SELECT extname, extversion FROM pg_extension WHERE extname='\''vector'\'';' \
+          --region ${var.aws_region} \
+          --output text"
 
-      echo "Creating bedrock_integration schema..."
-      aws rds-data execute-statement \
-        --resource-arn "${aws_rds_cluster.main.arn}" \
-        --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
-        --database "${aws_rds_cluster.main.database_name}" \
-        --sql 'CREATE SCHEMA IF NOT EXISTS bedrock_integration;' \
-        --region ${var.aws_region} || echo "Schema creation failed or already exists"
+      echo "🏗️  Creating bedrock_integration schema..."
+      retry_rds_command "Create bedrock_integration schema" \
+        "aws rds-data execute-statement \
+          --resource-arn '${aws_rds_cluster.main.arn}' \
+          --secret-arn '${aws_secretsmanager_secret.db_credentials.arn}' \
+          --database '${aws_rds_cluster.main.database_name}' \
+          --sql 'CREATE SCHEMA IF NOT EXISTS bedrock_integration;' \
+          --region ${var.aws_region} \
+          --output text >/dev/null 2>&1"
 
       # Create Bedrock user with proper permissions (as per AWS docs)
-      aws rds-data execute-statement \
-        --resource-arn "${aws_rds_cluster.main.arn}" \
-        --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
-        --database "${aws_rds_cluster.main.database_name}" \
-        --sql "CREATE ROLE bedrock_user LOGIN;" \
-        --region ${var.aws_region} || echo "bedrock_user role might already exist"
+      echo "👤 Creating bedrock_user role..."
+      retry_rds_command "Create bedrock_user role" \
+        "aws rds-data execute-statement \
+          --resource-arn '${aws_rds_cluster.main.arn}' \
+          --secret-arn '${aws_secretsmanager_secret.db_credentials.arn}' \
+          --database '${aws_rds_cluster.main.database_name}' \
+          --sql 'CREATE ROLE bedrock_user LOGIN;' \
+          --region ${var.aws_region} \
+          --output text >/dev/null 2>&1" || echo "ℹ️  bedrock_user role may already exist"
 
       # Grant permissions to bedrock_user
-      aws rds-data execute-statement \
-        --resource-arn "${aws_rds_cluster.main.arn}" \
-        --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
-        --database "${aws_rds_cluster.main.database_name}" \
-        --sql 'GRANT ALL ON SCHEMA bedrock_integration to bedrock_user;' \
-        --region ${var.aws_region}
+      echo "🔐 Granting permissions to bedrock_user..."
+      retry_rds_command "Grant schema permissions to bedrock_user" \
+        "aws rds-data execute-statement \
+          --resource-arn '${aws_rds_cluster.main.arn}' \
+          --secret-arn '${aws_secretsmanager_secret.db_credentials.arn}' \
+          --database '${aws_rds_cluster.main.database_name}' \
+          --sql 'GRANT ALL ON SCHEMA bedrock_integration to bedrock_user;' \
+          --region ${var.aws_region} \
+          --output text >/dev/null 2>&1"
 
       # Clean slate approach: Drop existing table if it exists (with wrong structure)
-      echo "Cleaning up any existing table with wrong structure..."
-      aws rds-data execute-statement \
-        --resource-arn "${aws_rds_cluster.main.arn}" \
-        --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
-        --database "${aws_rds_cluster.main.database_name}" \
-        --sql 'DROP TABLE IF EXISTS bedrock_integration.bedrock_kb CASCADE;' \
-        --region ${var.aws_region} || echo "No existing table to drop"
+      echo "🧹 Cleaning up any existing table with wrong structure..."
+      retry_rds_command "Drop existing table" \
+        "aws rds-data execute-statement \
+          --resource-arn '${aws_rds_cluster.main.arn}' \
+          --secret-arn '${aws_secretsmanager_secret.db_credentials.arn}' \
+          --database '${aws_rds_cluster.main.database_name}' \
+          --sql 'DROP TABLE IF EXISTS bedrock_integration.bedrock_kb CASCADE;' \
+          --region ${var.aws_region} \
+          --output text >/dev/null 2>&1" || echo "ℹ️  No existing table to drop"
 
       # Create table following AWS exact specification
-      echo "Creating bedrock_kb table with correct structure..."
-      aws rds-data execute-statement \
-        --resource-arn "${aws_rds_cluster.main.arn}" \
-        --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
-        --database "${aws_rds_cluster.main.database_name}" \
-        --sql 'CREATE TABLE bedrock_integration.bedrock_kb (
-          id UUID PRIMARY KEY,
-          embedding vector(1024),
-          chunks TEXT,
-          metadata JSON,
-          custom_metadata JSONB
-        );' \
-        --region ${var.aws_region}
+      echo "📋 Creating bedrock_kb table with correct structure..."
+      retry_rds_command "Create bedrock_kb table" \
+        "aws rds-data execute-statement \
+          --resource-arn '${aws_rds_cluster.main.arn}' \
+          --secret-arn '${aws_secretsmanager_secret.db_credentials.arn}' \
+          --database '${aws_rds_cluster.main.database_name}' \
+          --sql 'CREATE TABLE bedrock_integration.bedrock_kb (
+            id UUID PRIMARY KEY,
+            embedding vector(1024),
+            chunks TEXT,
+            metadata JSON,
+            custom_metadata JSONB
+          );' \
+          --region ${var.aws_region} \
+          --output text >/dev/null 2>&1"
 
       # Grant table permissions to bedrock_user
-      aws rds-data execute-statement \
-        --resource-arn "${aws_rds_cluster.main.arn}" \
-        --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
-        --database "${aws_rds_cluster.main.database_name}" \
-        --sql 'GRANT ALL ON TABLE bedrock_integration.bedrock_kb to bedrock_user;' \
-        --region ${var.aws_region}
+      echo "🔐 Granting table permissions to bedrock_user..."
+      retry_rds_command "Grant table permissions to bedrock_user" \
+        "aws rds-data execute-statement \
+          --resource-arn '${aws_rds_cluster.main.arn}' \
+          --secret-arn '${aws_secretsmanager_secret.db_credentials.arn}' \
+          --database '${aws_rds_cluster.main.database_name}' \
+          --sql 'GRANT ALL ON TABLE bedrock_integration.bedrock_kb to bedrock_user;' \
+          --region ${var.aws_region} \
+          --output text >/dev/null 2>&1"
 
       # Create the HNSW index for vector similarity search (AWS requirement)
-      # Using ef_construction=256 as recommended by AWS for pgvector 0.6.0+
-      aws rds-data execute-statement \
-        --resource-arn "${aws_rds_cluster.main.arn}" \
-        --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
-        --database "${aws_rds_cluster.main.database_name}" \
-        --sql 'CREATE INDEX IF NOT EXISTS idx_bedrock_kb_embedding ON bedrock_integration.bedrock_kb USING hnsw (embedding vector_cosine_ops) WITH (ef_construction=256);' \
-        --region ${var.aws_region}
+      echo "🎯 Creating HNSW index for vector similarity search..."
+      retry_rds_command "Create HNSW index" \
+        "aws rds-data execute-statement \
+          --resource-arn '${aws_rds_cluster.main.arn}' \
+          --secret-arn '${aws_secretsmanager_secret.db_credentials.arn}' \
+          --database '${aws_rds_cluster.main.database_name}' \
+          --sql 'CREATE INDEX IF NOT EXISTS idx_bedrock_kb_embedding ON bedrock_integration.bedrock_kb USING hnsw (embedding vector_cosine_ops) WITH (ef_construction=256);' \
+          --region ${var.aws_region} \
+          --output text >/dev/null 2>&1"
 
       # Verify the index was created successfully
-      echo "Verifying HNSW index creation..."
-      aws rds-data execute-statement \
-        --resource-arn "${aws_rds_cluster.main.arn}" \
-        --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
-        --database "${aws_rds_cluster.main.database_name}" \
-        --sql "SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'bedrock_kb' AND schemaname = 'bedrock_integration' AND indexdef LIKE '%hnsw%';" \
-        --region ${var.aws_region}
+      echo "🔍 Verifying HNSW index creation..."
+      retry_rds_command "Verify HNSW index" \
+        "aws rds-data execute-statement \
+          --resource-arn '${aws_rds_cluster.main.arn}' \
+          --secret-arn '${aws_secretsmanager_secret.db_credentials.arn}' \
+          --database '${aws_rds_cluster.main.database_name}' \
+          --sql 'SELECT indexname, indexdef FROM pg_indexes WHERE tablename = '\''bedrock_kb'\'' AND schemaname = '\''bedrock_integration'\'' AND indexdef LIKE '\''%hnsw%'\'';' \
+          --region ${var.aws_region} \
+          --output text"
 
       # Create text search index (AWS requirement)
-      aws rds-data execute-statement \
-        --resource-arn "${aws_rds_cluster.main.arn}" \
-        --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
-        --database "${aws_rds_cluster.main.database_name}" \
-        --sql 'CREATE INDEX IF NOT EXISTS idx_bedrock_kb_text ON bedrock_integration.bedrock_kb USING gin (to_tsvector('\''simple'\'', chunks));' \
-        --region ${var.aws_region}
+      echo "📝 Creating text search index..."
+      retry_rds_command "Create text search index" \
+        "aws rds-data execute-statement \
+          --resource-arn '${aws_rds_cluster.main.arn}' \
+          --secret-arn '${aws_secretsmanager_secret.db_credentials.arn}' \
+          --database '${aws_rds_cluster.main.database_name}' \
+          --sql 'CREATE INDEX IF NOT EXISTS idx_bedrock_kb_text ON bedrock_integration.bedrock_kb USING gin (to_tsvector('\''simple'\'', chunks));' \
+          --region ${var.aws_region} \
+          --output text >/dev/null 2>&1"
 
       # Create custom metadata index (AWS requirement for filtering)
-      aws rds-data execute-statement \
-        --resource-arn "${aws_rds_cluster.main.arn}" \
-        --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
-        --database "${aws_rds_cluster.main.database_name}" \
-        --sql 'CREATE INDEX IF NOT EXISTS idx_bedrock_kb_custom_metadata ON bedrock_integration.bedrock_kb USING gin (custom_metadata);' \
-        --region ${var.aws_region}
+      echo "🏷️  Creating custom metadata index..."
+      retry_rds_command "Create custom metadata index" \
+        "aws rds-data execute-statement \
+          --resource-arn '${aws_rds_cluster.main.arn}' \
+          --secret-arn '${aws_secretsmanager_secret.db_credentials.arn}' \
+          --database '${aws_rds_cluster.main.database_name}' \
+          --sql 'CREATE INDEX IF NOT EXISTS idx_bedrock_kb_custom_metadata ON bedrock_integration.bedrock_kb USING gin (custom_metadata);' \
+          --region ${var.aws_region} \
+          --output text >/dev/null 2>&1"
 
 
 
       # =================================================================
       # STEP 3: Initialize text2AgentTenants database (Tenant Management)
       # =================================================================
-      echo "Setting up text2AgentTenants database for tenant management..."
+      echo "🏢 Setting up text2AgentTenants database for tenant management..."
       
       # Enable UUID extension in text2AgentTenants database
-      aws rds-data execute-statement \
-        --resource-arn "${aws_rds_cluster.main.arn}" \
-        --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
-        --database "text2AgentTenants" \
-        --sql 'CREATE EXTENSION IF NOT EXISTS "uuid-ossp";' \
-        --region ${var.aws_region}
+      echo "🔧 Creating UUID extension in text2AgentTenants..."
+      retry_rds_command "Create UUID extension in text2AgentTenants" \
+        "aws rds-data execute-statement \
+          --resource-arn '${aws_rds_cluster.main.arn}' \
+          --secret-arn '${aws_secretsmanager_secret.db_credentials.arn}' \
+          --database 'text2AgentTenants' \
+          --sql 'CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";' \
+          --region ${var.aws_region} \
+          --output text >/dev/null 2>&1"
 
       # Create tenantmappings table in text2AgentTenants database
-      aws rds-data execute-statement \
-        --resource-arn "${aws_rds_cluster.main.arn}" \
-        --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
-        --database "text2AgentTenants" \
-        --sql 'CREATE TABLE IF NOT EXISTS tenantmappings (
-          id SERIAL PRIMARY KEY,
-          tenant_id UUID NOT NULL UNIQUE DEFAULT uuid_generate_v4(),
-          domain VARCHAR(255) NOT NULL,
-          bucket_name VARCHAR(255) NOT NULL,
-          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-          updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-          CONSTRAINT unique_domain UNIQUE (domain),
-          CONSTRAINT unique_bucket UNIQUE (bucket_name)
-        );' \
-        --region ${var.aws_region}
+      echo "📊 Creating tenantmappings table..."
+      retry_rds_command "Create tenantmappings table" \
+        "aws rds-data execute-statement \
+          --resource-arn '${aws_rds_cluster.main.arn}' \
+          --secret-arn '${aws_secretsmanager_secret.db_credentials.arn}' \
+          --database 'text2AgentTenants' \
+          --sql 'CREATE TABLE IF NOT EXISTS tenantmappings (
+            id SERIAL PRIMARY KEY,
+            tenant_id UUID NOT NULL UNIQUE DEFAULT uuid_generate_v4(),
+            domain VARCHAR(255) NOT NULL,
+            bucket_name VARCHAR(255) NOT NULL,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT unique_domain UNIQUE (domain),
+            CONSTRAINT unique_bucket UNIQUE (bucket_name)
+          );' \
+          --region ${var.aws_region} \
+          --output text >/dev/null 2>&1"
 
       # Create users table in text2AgentTenants database
-      aws rds-data execute-statement \
-        --resource-arn "${aws_rds_cluster.main.arn}" \
-        --secret-arn "${aws_secretsmanager_secret.db_credentials.arn}" \
-        --database "text2AgentTenants" \
-        --sql 'CREATE TABLE IF NOT EXISTS users (
-          id SERIAL PRIMARY KEY,
-          user_id UUID NOT NULL UNIQUE DEFAULT uuid_generate_v4(),
-          email VARCHAR(255) NOT NULL UNIQUE,
-          name VARCHAR(255) NOT NULL,
-          tenant_id UUID NOT NULL,
-          cognito_sub VARCHAR(255) UNIQUE,
-          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-          updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-          CONSTRAINT fk_tenant FOREIGN KEY (tenant_id) REFERENCES tenantmappings (tenant_id) ON DELETE CASCADE
-        );' \
-        --region ${var.aws_region}
+      echo "👥 Creating users table..."
+      retry_rds_command "Create users table" \
+        "aws rds-data execute-statement \
+          --resource-arn '${aws_rds_cluster.main.arn}' \
+          --secret-arn '${aws_secretsmanager_secret.db_credentials.arn}' \
+          --database 'text2AgentTenants' \
+          --sql 'CREATE TABLE IF NOT EXISTS users (
+            id SERIAL PRIMARY KEY,
+            user_id UUID NOT NULL UNIQUE DEFAULT uuid_generate_v4(),
+            email VARCHAR(255) NOT NULL UNIQUE,
+            name VARCHAR(255) NOT NULL,
+            tenant_id UUID NOT NULL,
+            cognito_sub VARCHAR(255) UNIQUE,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT fk_tenant FOREIGN KEY (tenant_id) REFERENCES tenantmappings (tenant_id) ON DELETE CASCADE
+          );' \
+          --region ${var.aws_region} \
+          --output text >/dev/null 2>&1"
 
       # Create indexes for text2AgentTenants database
       aws rds-data execute-statement \
@@ -461,11 +571,8 @@ resource "null_resource" "bedrock_readiness_check" {
     command = <<-EOF
       echo "🔍 BEDROCK READINESS CHECK - Final validation before Knowledge Base creation"
       
-      # Wait extra time in GitHub Actions
-      if [ "$GITHUB_ACTIONS" = "true" ]; then
-        echo "⏱️  GitHub Actions detected - waiting additional 120 seconds for database stabilization"
-        sleep 120
-      fi
+      # Database is already verified ready from previous step
+      echo "⏱️  Database readiness already confirmed - proceeding with validation"
 
       # Test 1: Verify table exists and has correct structure
       echo "🔍 Test 1: Verifying table structure..."
