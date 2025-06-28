@@ -62,6 +62,9 @@ override.tf.json
 *_override.tf
 *_override.tf.json
 
+# Ignore automatically generated backend configuration
+backend-override.tf
+
 # Include override files you do wish to add to version control using negated pattern
 # !example_override.tf
 
