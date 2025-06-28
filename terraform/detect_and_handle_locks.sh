@@ -31,12 +31,17 @@ fi
 echo "🚨 Found active locks!"
 echo "STALE_LOCKS_FOUND=true" >> $GITHUB_ENV
 
-# Process lock information
-LOCK_DETAILS=""
-LOCK_IDS=""
-LOCK_COUNT=0
+# Process lock information - use temporary files to avoid subshell variable issues
+TEMP_DIR=$(mktemp -d)
+LOCK_DETAILS_FILE="$TEMP_DIR/lock_details"
+LOCK_IDS_FILE="$TEMP_DIR/lock_ids"
 
-echo "$LOCKS" | while IFS= read -r lock_json; do
+LOCK_COUNT=0
+> "$LOCK_DETAILS_FILE"
+> "$LOCK_IDS_FILE"
+
+# Process each lock
+while IFS= read -r lock_json; do
     if [ -n "$lock_json" ]; then
         LOCK_COUNT=$((LOCK_COUNT + 1))
         
@@ -83,23 +88,27 @@ except:
     print('Parse error')
 " 2>/dev/null)
         
-        # Build details for GitHub summary
-        LOCK_DETAILS="${LOCK_DETAILS}
+        # Append to details file
+        cat >> "$LOCK_DETAILS_FILE" << EOF
+
 **Lock ${LOCK_COUNT}:**
 - **ID:** \`${LOCK_ID}\`
 - **Operation:** ${OPERATION}
 - **Created:** ${CREATED}
 - **Who:** ${WHO}
-"
+EOF
         
-        # Collect lock IDs
-        if [ -n "$LOCK_IDS" ]; then
-            LOCK_IDS="${LOCK_IDS},${LOCK_ID}"
-        else
-            LOCK_IDS="$LOCK_ID"
+        # Append to lock IDs file
+        if [ -s "$LOCK_IDS_FILE" ]; then
+            echo -n "," >> "$LOCK_IDS_FILE"
         fi
+        echo -n "$LOCK_ID" >> "$LOCK_IDS_FILE"
     fi
-done
+done <<< "$LOCKS"
+
+# Read the accumulated data
+LOCK_DETAILS=$(cat "$LOCK_DETAILS_FILE")
+LOCK_IDS=$(cat "$LOCK_IDS_FILE")
 
 # Export to GitHub environment
 {
@@ -110,6 +119,9 @@ done
 
 echo "LOCK_IDS=$LOCK_IDS" >> $GITHUB_ENV
 echo "LOCK_COUNT=$LOCK_COUNT" >> $GITHUB_ENV
+
+# Cleanup
+rm -rf "$TEMP_DIR"
 
 # Display summary
 echo ""

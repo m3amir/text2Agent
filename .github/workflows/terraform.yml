@@ -159,12 +159,23 @@ jobs:
           chmod +x ./detect_and_handle_locks.sh
           ./detect_and_handle_locks.sh
 
+      - name: Display Debug Info
+        run: |
+          echo "🔍 Debug Information:"
+          echo "STALE_LOCKS_FOUND: ${{ env.STALE_LOCKS_FOUND }}"
+          echo "LOCK_IDS: ${{ env.LOCK_IDS }}"
+          echo "LOCK_COUNT: ${{ env.LOCK_COUNT }}"
+          echo ""
+
       - name: Create Approval Summary
         if: env.STALE_LOCKS_FOUND == 'true'
         run: |
           echo "## 🚨 Stale Terraform Locks Detected" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "⚠️ **Stale locks must be resolved before any Terraform operations can proceed.**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**🔑 IMPORTANT: This job requires approval in the GitHub Actions interface.**" >> $GITHUB_STEP_SUMMARY
+          echo "**Look for the 'Review deployments' button and approve to unlock the stale locks.**" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "The following stale locks have been detected in the Terraform state:" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -181,15 +192,10 @@ jobs:
           echo "- The locks are from old/cancelled workflows (check the timestamp)" >> $GITHUB_STEP_SUMMARY
           echo "- You've verified no active deployments in progress elsewhere" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 🎯 Current Lock Details:" >> $GITHUB_STEP_SUMMARY
-          echo "- **Lock ID**: \`8d6b101f-1b6d-5cc1-72e3-4d7252c5b6d7\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Created**: 2025-06-28 14:41:49 UTC (from cancelled workflow)" >> $GITHUB_STEP_SUMMARY
-          echo "- **Operation**: OperationTypePlan" >> $GITHUB_STEP_SUMMARY
-          echo "- **Runner**: runner@fv-az1280-405" >> $GITHUB_STEP_SUMMARY
+          echo "### 📋 Detected Lock IDs to Unlock:" >> $GITHUB_STEP_SUMMARY
+          echo "\`${{ env.LOCK_IDS }}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**✅ This lock is safe to approve - it's from an old cancelled workflow.**" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Approving this environment will automatically unlock the stale locks and allow Terraform operations to proceed.**" >> $GITHUB_STEP_SUMMARY
+          echo "**Approving this environment will automatically unlock these stale locks and allow Terraform operations to proceed.**" >> $GITHUB_STEP_SUMMARY
 
       - name: Unlock Approved Locks
         if: env.STALE_LOCKS_FOUND == 'true'
