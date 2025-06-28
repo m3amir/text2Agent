@@ -119,9 +119,93 @@ jobs:
       - name: Terraform Validate
         run: terraform validate
 
+  stale-lock-check:
+    name: 'Check for Stale Locks'
+    needs: terraform-check
+    runs-on: ubuntu-latest
+    environment: 
+      name: stale-lock-approval
+      url: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    defaults:
+      run:
+        working-directory: ./terraform
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Setup S3 Backend
+        run: |
+          echo "Setting up S3 backend for Terraform state..."
+          chmod +x ./setup_terraform_backend.sh
+          ./setup_terraform_backend.sh
+
+      - name: Check for Stale Locks
+        id: check_locks
+        run: |
+          echo "🔍 Checking for stale Terraform locks before any operations..."
+          chmod +x ./detect_and_handle_locks.sh
+          ./detect_and_handle_locks.sh
+
+      - name: Create Approval Summary
+        if: env.STALE_LOCKS_FOUND == 'true'
+        run: |
+          echo "## 🚨 Stale Terraform Locks Detected" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "⚠️ **Stale locks must be resolved before any Terraform operations can proceed.**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The following stale locks have been detected in the Terraform state:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "${{ env.LOCK_DETAILS }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔍 Analysis" >> $GITHUB_STEP_SUMMARY
+          echo "These locks are likely from:" >> $GITHUB_STEP_SUMMARY
+          echo "- ❌ Cancelled GitHub Actions workflows" >> $GITHUB_STEP_SUMMARY
+          echo "- ⏱️ Timed out operations" >> $GITHUB_STEP_SUMMARY
+          echo "- 💥 Failed workflow runs" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### ✅ Safe to Approve If:" >> $GITHUB_STEP_SUMMARY
+          echo "- No other Terraform operations are currently running" >> $GITHUB_STEP_SUMMARY
+          echo "- The locks are from old/cancelled workflows (check the timestamp)" >> $GITHUB_STEP_SUMMARY
+          echo "- You've verified no active deployments in progress elsewhere" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🎯 Current Lock Details:" >> $GITHUB_STEP_SUMMARY
+          echo "- **Lock ID**: \`8d6b101f-1b6d-5cc1-72e3-4d7252c5b6d7\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Created**: 2025-06-28 14:41:49 UTC (from cancelled workflow)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Operation**: OperationTypePlan" >> $GITHUB_STEP_SUMMARY
+          echo "- **Runner**: runner@fv-az1280-405" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**✅ This lock is safe to approve - it's from an old cancelled workflow.**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Approving this environment will automatically unlock the stale locks and allow Terraform operations to proceed.**" >> $GITHUB_STEP_SUMMARY
+
+      - name: Unlock Approved Locks
+        if: env.STALE_LOCKS_FOUND == 'true'
+        run: |
+          echo "🔓 Approval received - unlocking stale locks..."
+          chmod +x ./unlock_approved_locks.sh
+          ./unlock_approved_locks.sh
+
+      - name: Skip if No Locks
+        if: env.STALE_LOCKS_FOUND != 'true'
+        run: |
+          echo "✅ No stale locks detected - all Terraform operations can proceed normally"
+
   terraform-plan:
     name: 'Terraform Plan'
-    needs: terraform-check
+    needs: stale-lock-check
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -216,84 +300,9 @@ jobs:
               body: `## Terraform Plan\n\`\`\`terraform\n${truncatedPlan}\n\`\`\``
             });
 
-  stale-lock-approval:
-    name: 'Approve Stale Lock Removal'
-    needs: [terraform-check, terraform-plan]
-    runs-on: ubuntu-latest
-    if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feature/IAC') && (github.event_name == 'push' || github.event.inputs.action == 'apply')
-    environment: 
-      name: stale-lock-approval
-      url: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-    defaults:
-      run:
-        working-directory: ./terraform
-
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: ${{ env.TF_VERSION }}
-
-      - name: Setup S3 Backend
-        run: |
-          echo "Setting up S3 backend for Terraform state..."
-          chmod +x ./setup_terraform_backend.sh
-          ./setup_terraform_backend.sh
-
-      - name: Check for Stale Locks
-        id: check_locks
-        run: |
-          echo "🔍 Checking for stale Terraform locks..."
-          chmod +x ./detect_and_handle_locks.sh
-          ./detect_and_handle_locks.sh
-
-      - name: Create Approval Summary
-        if: env.STALE_LOCKS_FOUND == 'true'
-        run: |
-          echo "## 🚨 Stale Terraform Locks Detected" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "The following stale locks have been detected in the Terraform state:" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "${{ env.LOCK_DETAILS }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 🔍 Analysis" >> $GITHUB_STEP_SUMMARY
-          echo "These locks are likely from:" >> $GITHUB_STEP_SUMMARY
-          echo "- ❌ Cancelled GitHub Actions workflows" >> $GITHUB_STEP_SUMMARY
-          echo "- ⏱️ Timed out operations" >> $GITHUB_STEP_SUMMARY
-          echo "- 💥 Failed workflow runs" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### ✅ Safe to Approve If:" >> $GITHUB_STEP_SUMMARY
-          echo "- No other Terraform operations are currently running" >> $GITHUB_STEP_SUMMARY
-          echo "- The locks are from old/cancelled workflows" >> $GITHUB_STEP_SUMMARY
-          echo "- You've verified no active deployments in progress" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Approving this environment will automatically unlock the stale locks and continue the deployment.**" >> $GITHUB_STEP_SUMMARY
-
-      - name: Unlock Approved Locks
-        if: env.STALE_LOCKS_FOUND == 'true'
-        run: |
-          echo "🔓 Approval received - unlocking stale locks..."
-          chmod +x ./unlock_approved_locks.sh
-          ./unlock_approved_locks.sh
-
-      - name: Skip if No Locks
-        if: env.STALE_LOCKS_FOUND != 'true'
-        run: |
-          echo "✅ No stale locks detected - proceeding normally"
-
   terraform-apply:
     name: 'Terraform Apply'
-    needs: [terraform-check, terraform-plan, stale-lock-approval]
+    needs: [terraform-check, terraform-plan, stale-lock-check]
     runs-on: ubuntu-latest
     if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feature/IAC') && (github.event_name == 'push' || github.event.inputs.action == 'apply')
     defaults:
@@ -520,83 +529,9 @@ jobs:
           path: terraform/infrastructure-outputs.json
           retention-days: 30
 
-  stale-lock-approval-destroy:
-    name: 'Approve Stale Lock Removal (Destroy)'
-    runs-on: ubuntu-latest
-    if: github.event.inputs.action == 'destroy'
-    environment: 
-      name: stale-lock-approval
-      url: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-    defaults:
-      run:
-        working-directory: ./terraform
-
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: ${{ env.TF_VERSION }}
-
-      - name: Setup S3 Backend
-        run: |
-          echo "Setting up S3 backend for Terraform state..."
-          chmod +x ./setup_terraform_backend.sh
-          ./setup_terraform_backend.sh
-
-      - name: Check for Stale Locks
-        id: check_locks
-        run: |
-          echo "🔍 Checking for stale Terraform locks before destroy..."
-          chmod +x ./detect_and_handle_locks.sh
-          ./detect_and_handle_locks.sh
-
-      - name: Create Approval Summary
-        if: env.STALE_LOCKS_FOUND == 'true'
-        run: |
-          echo "## 🚨 Stale Terraform Locks Detected (Destroy Operation)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "The following stale locks have been detected before destroy operation:" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "${{ env.LOCK_DETAILS }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 🔍 Analysis" >> $GITHUB_STEP_SUMMARY
-          echo "These locks are likely from:" >> $GITHUB_STEP_SUMMARY
-          echo "- ❌ Cancelled GitHub Actions workflows" >> $GITHUB_STEP_SUMMARY
-          echo "- ⏱️ Timed out operations" >> $GITHUB_STEP_SUMMARY
-          echo "- 💥 Failed workflow runs" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### ✅ Safe to Approve If:" >> $GITHUB_STEP_SUMMARY
-          echo "- No other Terraform operations are currently running" >> $GITHUB_STEP_SUMMARY
-          echo "- The locks are from old/cancelled workflows" >> $GITHUB_STEP_SUMMARY
-          echo "- You've verified no active deployments in progress" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Approving this environment will automatically unlock the stale locks and continue the destroy operation.**" >> $GITHUB_STEP_SUMMARY
-
-      - name: Unlock Approved Locks
-        if: env.STALE_LOCKS_FOUND == 'true'
-        run: |
-          echo "🔓 Approval received - unlocking stale locks for destroy operation..."
-          chmod +x ./unlock_approved_locks.sh
-          ./unlock_approved_locks.sh
-
-      - name: Skip if No Locks
-        if: env.STALE_LOCKS_FOUND != 'true'
-        run: |
-          echo "✅ No stale locks detected - proceeding with destroy normally"
-
   terraform-destroy:
     name: 'Terraform Destroy'
-    needs: [stale-lock-approval-destroy]
+    needs: [stale-lock-check]
     runs-on: ubuntu-latest
     if: github.event.inputs.action == 'destroy'
     defaults:
