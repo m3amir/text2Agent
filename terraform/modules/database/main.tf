@@ -224,7 +224,7 @@ resource "null_resource" "db_schema_init" {
           else
             # Check for database resuming exceptions in the output
             if echo "$output" | grep -qi "DatabaseResumingException\|resuming\|auto-pause"; then
-              echo "⏳ Database resuming from auto-pause, waiting ${wait_time}s..."
+              echo "⏳ Database resuming from auto-pause, waiting $${wait_time}s..."
               echo "   Error details: $(echo "$output" | head -n 2)"
               sleep $wait_time
               # Increase wait time for subsequent attempts (auto-pause can take time)
