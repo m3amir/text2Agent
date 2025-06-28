@@ -43,13 +43,13 @@ jobs:
 
       - name: Build psycopg2 Layer
         run: |
-          echo "🔨 Building psycopg2 Lambda Layer with Docker for Linux compatibility..."
+          echo "Building psycopg2 Lambda Layer with Docker for Linux compatibility..."
           chmod +x ./build_psycopg2_layer.sh
           ./build_psycopg2_layer.sh
 
       - name: Build Lambda Function Package
         run: |
-          echo "📦 Building Lambda function package (code only)..."
+          echo "Building Lambda function package (code only)..."
           chmod +x ./build_lambda.sh
           ./build_lambda.sh
 
@@ -58,10 +58,10 @@ jobs:
           echo "✅ Verifying Lambda build artifacts..."
           ls -la *.zip
           echo ""
-          echo "📋 psycopg2 layer contents:"
+          echo "psycopg2 layer contents:"
           unzip -l psycopg2-layer.zip | head -10
           echo ""
-          echo "📋 Lambda function contents:"
+          echo "Lambda function contents:"
           unzip -l post_confirmation.zip
 
       - name: Upload Lambda Artifacts
@@ -108,7 +108,7 @@ jobs:
 
       - name: Setup S3 Backend
         run: |
-          echo "🚀 Setting up S3 backend for Terraform state..."
+          echo "Setting up S3 backend for Terraform state..."
           chmod +x ./setup_terraform_backend.sh
           ./setup_terraform_backend.sh
 
@@ -151,7 +151,7 @@ jobs:
 
       - name: Setup S3 Backend
         run: |
-          echo "🚀 Setting up S3 backend for Terraform state..."
+          echo "Setting up S3 backend for Terraform state..."
           chmod +x ./setup_terraform_backend.sh
           ./setup_terraform_backend.sh
 
@@ -161,7 +161,7 @@ jobs:
 
       - name: Backup Current State Before Planning
         run: |
-          echo "💾 Creating backup of current Terraform state..."
+          echo "Creating backup of current Terraform state..."
           TIMESTAMP=$(date +%Y%m%d-%H%M%S)
           BACKUP_KEY="backups/terraform.tfstate.${TIMESTAMP}"
           
@@ -170,7 +170,7 @@ jobs:
              --key text2agent/production/terraform.tfstate \
              --region ${{ env.AWS_REGION }} 2>/dev/null; then
             
-            echo "📁 Current state found, creating backup..."
+            echo "Current state found, creating backup..."
             aws s3 cp s3://text2agent-terraform-state-eu-west-2/text2agent/production/terraform.tfstate \
                       s3://text2agent-terraform-state-eu-west-2/${BACKUP_KEY} \
                       --region ${{ env.AWS_REGION }}
@@ -178,13 +178,13 @@ jobs:
             echo "✅ State backed up to: s3://text2agent-terraform-state-eu-west-2/${BACKUP_KEY}"
             echo "BACKUP_KEY=${BACKUP_KEY}" >> $GITHUB_ENV
           else
-            echo "ℹ️ No existing state found - this appears to be initial deployment"
+            echo "No existing state found - this appears to be initial deployment"
             echo "BACKUP_KEY=" >> $GITHUB_ENV
           fi
 
       - name: Terraform Plan
         run: |
-          echo "🚀 Planning complete infrastructure deployment..."
+          echo "Planning complete infrastructure deployment..."
           terraform plan -out=tfplan \
             -var="aws_region=${{ env.AWS_REGION }}" \
             -var="aws_profile="
@@ -213,7 +213,7 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `## Terraform Plan 🏗️\n\`\`\`terraform\n${truncatedPlan}\n\`\`\``
+              body: `## Terraform Plan\n\`\`\`terraform\n${truncatedPlan}\n\`\`\``
             });
 
   terraform-apply:
@@ -255,7 +255,7 @@ jobs:
 
       - name: Setup S3 Backend
         run: |
-          echo "🚀 Setting up S3 backend for Terraform state..."
+          echo "Setting up S3 backend for Terraform state..."
           chmod +x ./setup_terraform_backend.sh
           ./setup_terraform_backend.sh
 
@@ -265,7 +265,7 @@ jobs:
 
       - name: Backup Current State Before Apply
         run: |
-          echo "💾 Creating backup of current Terraform state before apply..."
+          echo "Creating backup of current Terraform state before apply..."
           TIMESTAMP=$(date +%Y%m%d-%H%M%S)
           BACKUP_KEY="backups/pre-apply-terraform.tfstate.${TIMESTAMP}"
           
@@ -274,7 +274,7 @@ jobs:
              --key text2agent/production/terraform.tfstate \
              --region ${{ env.AWS_REGION }} 2>/dev/null; then
             
-            echo "📁 Current state found, creating pre-apply backup..."
+            echo "Current state found, creating pre-apply backup..."
             aws s3 cp s3://text2agent-terraform-state-eu-west-2/text2agent/production/terraform.tfstate \
                       s3://text2agent-terraform-state-eu-west-2/${BACKUP_KEY} \
                       --region ${{ env.AWS_REGION }}
@@ -287,15 +287,15 @@ jobs:
                       s3://text2agent-terraform-state-eu-west-2/backups/latest-pre-apply.tfstate \
                       --region ${{ env.AWS_REGION }}
             
-            echo "📌 Latest backup also saved as: backups/latest-pre-apply.tfstate"
+            echo "Latest backup also saved as: backups/latest-pre-apply.tfstate"
           else
-            echo "ℹ️ No existing state found - this appears to be initial deployment"
+            echo "No existing state found - this appears to be initial deployment"
             echo "PRE_APPLY_BACKUP_KEY=" >> $GITHUB_ENV
           fi
 
       - name: Terraform Apply with Bedrock Error Handling
         run: |
-          echo "🚀 Applying complete infrastructure deployment..."
+          echo "Applying complete infrastructure deployment..."
           
           # First attempt: Normal apply
           APPLY_OUTPUT_FILE="/tmp/terraform_apply_output.log"
@@ -303,11 +303,11 @@ jobs:
           if terraform apply -auto-approve tfplan 2>&1 | tee "$APPLY_OUTPUT_FILE"; then
             echo "✅ Complete infrastructure deployment successful"
           else
-            echo "⚠️ Initial apply failed - analyzing error..."
+            echo "Initial apply failed - analyzing error..."
             
             # Check for different types of errors
             if grep -q "Saved plan is stale" "$APPLY_OUTPUT_FILE"; then
-              echo "🔧 Plan is stale - regenerating plan and reapplying..."
+              echo "Plan is stale - regenerating plan and reapplying..."
               
               # Regenerate plan and apply
               terraform plan -out=tfplan-fresh \
@@ -319,7 +319,7 @@ jobs:
               echo "✅ Infrastructure deployed with fresh plan"
               
             elif grep -q "ResourceNotFoundException.*DataSource.*is not found" "$APPLY_OUTPUT_FILE"; then
-              echo "🔧 Detected orphaned Bedrock data source - applying fix..."
+              echo "Detected orphaned Bedrock data source - applying fix..."
               
               # Remove the problematic data source from state
               terraform state rm module.ai.aws_bedrockagent_data_source.s3_documents 2>/dev/null || echo "Could not remove from state"
@@ -345,7 +345,7 @@ jobs:
       - name: Post-Apply State Backup
         if: success()
         run: |
-          echo "💾 Creating post-apply state backup for rollback purposes..."
+          echo "Creating post-apply state backup for rollback purposes..."
           TIMESTAMP=$(date +%Y%m%d-%H%M%S)
           POST_APPLY_BACKUP_KEY="backups/post-apply-terraform.tfstate.${TIMESTAMP}"
           
@@ -354,13 +354,13 @@ jobs:
                     --region ${{ env.AWS_REGION }}
           
           echo "✅ Post-apply state backed up to: s3://text2agent-terraform-state-eu-west-2/${POST_APPLY_BACKUP_KEY}"
-          echo "📌 Backup created after successful apply for future reference"
+          echo "Backup created after successful apply for future reference"
 
       - name: Rollback on Failure
         if: failure() && env.PRE_APPLY_BACKUP_KEY != ''
         run: |
-          echo "🔥 FAILURE DETECTED - Attempting to restore previous state..."
-          echo "⚠️ This is an emergency rollback procedure"
+          echo "FAILURE DETECTED - Attempting to restore previous state..."
+          echo "This is an emergency rollback procedure"
           echo "Restoring state from: $PRE_APPLY_BACKUP_KEY"
           
           # Restore the previous state
@@ -368,24 +368,24 @@ jobs:
                     s3://text2agent-terraform-state-eu-west-2/text2agent/production/terraform.tfstate \
                     --region ${{ env.AWS_REGION }}
           
-          echo "⚠️ STATE RESTORED TO PRE-APPLY VERSION"
-          echo "⚠️ Manual intervention may still be required to clean up partially created resources"
-          echo "⚠️ Check AWS Console for orphaned resources"
+          echo "STATE RESTORED TO PRE-APPLY VERSION"
+          echo "Manual intervention may still be required to clean up partially created resources"
+          echo "Check AWS Console for orphaned resources"
 
       - name: Generate Outputs
         run: |
           terraform output -json > infrastructure-outputs.json
-          echo "## 🚀 COMPLETE text2Agent Infrastructure Deployed! 🎉" >> $GITHUB_STEP_SUMMARY
+          echo "## COMPLETE text2Agent Infrastructure Deployed!" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 🏗️ **FULL STACK DEPLOYED**:" >> $GITHUB_STEP_SUMMARY
-          echo "- **🌐 VPC & Networking**: Private subnets, security groups" >> $GITHUB_STEP_SUMMARY
-          echo "- **🗄️ Aurora PostgreSQL**: Cluster with serverless v2 scaling" >> $GITHUB_STEP_SUMMARY
-          echo "- **🔐 Cognito Authentication**: User pool, client, domain" >> $GITHUB_STEP_SUMMARY
-          echo "- **⚡ Lambda Functions**: Post-confirmation triggers" >> $GITHUB_STEP_SUMMARY
-          echo "- **📦 S3 Storage**: Document bucket with encryption" >> $GITHUB_STEP_SUMMARY
-          echo "- **🤖 Bedrock Knowledge Base**: AI-powered document search" >> $GITHUB_STEP_SUMMARY
+          echo "### **FULL STACK DEPLOYED**:" >> $GITHUB_STEP_SUMMARY
+          echo "- **VPC & Networking**: Private subnets, security groups" >> $GITHUB_STEP_SUMMARY
+          echo "- **Aurora PostgreSQL**: Cluster with serverless v2 scaling" >> $GITHUB_STEP_SUMMARY
+          echo "- **Cognito Authentication**: User pool, client, domain" >> $GITHUB_STEP_SUMMARY
+          echo "- **Lambda Functions**: Post-confirmation triggers" >> $GITHUB_STEP_SUMMARY
+          echo "- **S3 Storage**: Document bucket with encryption" >> $GITHUB_STEP_SUMMARY
+          echo "- **Bedrock Knowledge Base**: AI-powered document search" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 📋 **Infrastructure Details**:" >> $GITHUB_STEP_SUMMARY
+          echo "### **Infrastructure Details**:" >> $GITHUB_STEP_SUMMARY
           echo "- **VPC**: $(terraform output -raw vpc_id)" >> $GITHUB_STEP_SUMMARY
           echo "- **Aurora Cluster**: $(terraform output -raw aurora_cluster_id)" >> $GITHUB_STEP_SUMMARY
           echo "- **Aurora Database**: $(terraform output -raw aurora_database_name)" >> $GITHUB_STEP_SUMMARY
@@ -395,19 +395,19 @@ jobs:
           echo "- **Bedrock KB ARN**: $(terraform output -raw bedrock_knowledge_base_arn)" >> $GITHUB_STEP_SUMMARY
           echo "- **Data Source ID**: $(terraform output -raw bedrock_data_source_id)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 🔐 **Authentication & Lambda**:" >> $GITHUB_STEP_SUMMARY
+          echo "### **Authentication & Lambda**:" >> $GITHUB_STEP_SUMMARY
           echo "- **Cognito User Pool**: $(terraform output -raw cognito_user_pool_id)" >> $GITHUB_STEP_SUMMARY
           echo "- **Cognito Client**: $(terraform output -raw cognito_user_pool_client_id)" >> $GITHUB_STEP_SUMMARY
           echo "- **Cognito Domain**: $(terraform output -raw cognito_user_pool_domain)" >> $GITHUB_STEP_SUMMARY
           echo "- **Post Confirmation Lambda**: $(terraform output -raw post_confirmation_lambda_name)" >> $GITHUB_STEP_SUMMARY
           echo "- **Lambda Role**: $(terraform output -raw lambda_role_arn)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 🎯 **Deployment Status**: ✅ PRODUCTION READY" >> $GITHUB_STEP_SUMMARY
+          echo "### **Deployment Status**: ✅ PRODUCTION READY" >> $GITHUB_STEP_SUMMARY
           echo "- **Environment**: $(terraform output -raw environment)" >> $GITHUB_STEP_SUMMARY
           echo "- **Region**: $(terraform output -raw aws_region)" >> $GITHUB_STEP_SUMMARY
           echo "- **Project**: $(terraform output -raw project_name)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 🔧 **Architecture**: Complete AI-Powered Platform" >> $GITHUB_STEP_SUMMARY
+          echo "### **Architecture**: Complete AI-Powered Platform" >> $GITHUB_STEP_SUMMARY
           echo "Ready for document ingestion, user authentication, and AI-powered search!" >> $GITHUB_STEP_SUMMARY
 
       - name: Upload Infrastructure Outputs
@@ -443,7 +443,7 @@ jobs:
 
       - name: Setup S3 Backend
         run: |
-          echo "🚀 Setting up S3 backend for Terraform state..."
+          echo "Setting up S3 backend for Terraform state..."
           chmod +x ./setup_terraform_backend.sh
           ./setup_terraform_backend.sh
 
@@ -453,7 +453,7 @@ jobs:
 
       - name: Verify State and Resources
         run: |
-          echo "🔍 Checking Terraform state and AWS resources..."
+          echo "Checking Terraform state and AWS resources..."
           echo "Current state resources:"
           RESOURCES=$(terraform state list)
           if [ -z "$RESOURCES" ]; then
@@ -469,7 +469,7 @@ jobs:
           
           echo ""
           echo "Verifying state shows resources to destroy:"
-          terraform show || echo "⚠️ No state data"
+          terraform show || echo "No state data"
           
           echo ""
           echo "Planning destroy to see what will be removed:"
@@ -477,7 +477,7 @@ jobs:
 
       - name: Terraform Destroy
         run: |
-          echo "💥 Starting infrastructure destruction..."
+          echo "Starting infrastructure destruction..."
           echo "Creating destroy plan..."
           terraform plan -destroy -out=destroy-plan -var="aws_region=${{ env.AWS_REGION }}" -var="aws_profile="
           
@@ -490,7 +490,7 @@ jobs:
 
       - name: Verify Destruction
         run: |
-          echo "🔍 Verifying destruction completed..."
+          echo "Verifying destruction completed..."
           terraform state list || echo "✅ State is empty - all resources destroyed"
           
           echo ""
@@ -515,21 +515,21 @@ jobs:
 
       - name: Destroy Summary
         run: |
-          echo "## 💥 COMPLETE text2Agent Infrastructure Destroyed" >> $GITHUB_STEP_SUMMARY
+          echo "## COMPLETE text2Agent Infrastructure Destroyed" >> $GITHUB_STEP_SUMMARY
           echo "✅ All infrastructure resources have been removed" >> $GITHUB_STEP_SUMMARY
           echo "✅ Terraform state is clean" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 🗑️ **Infrastructure Destroyed**:" >> $GITHUB_STEP_SUMMARY
-          echo "- **🌐 VPC & Networking**: VPC, subnets, security groups" >> $GITHUB_STEP_SUMMARY
-          echo "- **🗄️ Aurora PostgreSQL**: Cluster, instance, database" >> $GITHUB_STEP_SUMMARY
-          echo "- **🔐 Authentication**: Cognito User Pool, client, domain" >> $GITHUB_STEP_SUMMARY
-          echo "- **⚡ Lambda Functions**: Post-confirmation function, layers, roles" >> $GITHUB_STEP_SUMMARY
-          echo "- **📦 S3 Storage**: Document bucket with all configurations" >> $GITHUB_STEP_SUMMARY
-          echo "- **🤖 Bedrock Knowledge Base**: AI knowledge base and data sources" >> $GITHUB_STEP_SUMMARY
-          echo "- **🔒 IAM Resources**: Roles, policies, permissions" >> $GITHUB_STEP_SUMMARY
+          echo "### **Infrastructure Destroyed**:" >> $GITHUB_STEP_SUMMARY
+          echo "- **VPC & Networking**: VPC, subnets, security groups" >> $GITHUB_STEP_SUMMARY
+          echo "- **Aurora PostgreSQL**: Cluster, instance, database" >> $GITHUB_STEP_SUMMARY
+          echo "- **Authentication**: Cognito User Pool, client, domain" >> $GITHUB_STEP_SUMMARY
+          echo "- **Lambda Functions**: Post-confirmation function, layers, roles" >> $GITHUB_STEP_SUMMARY
+          echo "- **S3 Storage**: Document bucket with all configurations" >> $GITHUB_STEP_SUMMARY
+          echo "- **Bedrock Knowledge Base**: AI knowledge base and data sources" >> $GITHUB_STEP_SUMMARY
+          echo "- **IAM Resources**: Roles, policies, permissions" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 🎯 **Cleanup Status**: ✅ COMPLETE" >> $GITHUB_STEP_SUMMARY
+          echo "### **Cleanup Status**: ✅ COMPLETE" >> $GITHUB_STEP_SUMMARY
           echo "All AWS resources have been safely removed from your account." >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 🔧 **Ready for Redeployment**" >> $GITHUB_STEP_SUMMARY
+          echo "### **Ready for Redeployment**" >> $GITHUB_STEP_SUMMARY
           echo "Infrastructure can be redeployed at any time using this workflow." >> $GITHUB_STEP_SUMMARY
