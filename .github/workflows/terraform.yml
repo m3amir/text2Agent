@@ -297,26 +297,48 @@ jobs:
         run: |
           echo "Applying complete infrastructure deployment..."
           
-          # First attempt: Normal apply
+          # Check if state has changed since plan creation by attempting to validate the plan
+          echo "Validating plan currency..."
           APPLY_OUTPUT_FILE="/tmp/terraform_apply_output.log"
           
-          if terraform apply -auto-approve tfplan 2>&1 | tee "$APPLY_OUTPUT_FILE"; then
+          # Try to apply the existing plan, but handle stale plan gracefully
+          if [ -f "tfplan" ] && terraform apply -auto-approve tfplan 2>&1 | tee "$APPLY_OUTPUT_FILE"; then
             echo "✅ Complete infrastructure deployment successful"
           else
-            echo "Initial apply failed - analyzing error..."
+            echo "Apply failed - analyzing error and attempting recovery..."
             
             # Check for different types of errors
-            if grep -q "Saved plan is stale" "$APPLY_OUTPUT_FILE"; then
-              echo "Plan is stale - regenerating plan and reapplying..."
+            if grep -q "Saved plan is stale\|plan was created" "$APPLY_OUTPUT_FILE"; then
+              echo "🔄 Plan is stale due to state changes (likely from destroy operation)"
+              echo "Generating fresh plan from current state..."
               
-              # Regenerate plan and apply
+              # Remove old plan and regenerate
+              rm -f tfplan
               terraform plan -out=tfplan-fresh \
                 -var="aws_region=${{ env.AWS_REGION }}" \
                 -var="aws_profile="
               
               echo "Applying fresh plan..."
-              terraform apply -auto-approve tfplan-fresh
-              echo "✅ Infrastructure deployed with fresh plan"
+              if terraform apply -auto-approve tfplan-fresh; then
+                echo "✅ Infrastructure deployed successfully with fresh plan"
+              else
+                echo "❌ Fresh plan apply also failed"
+                exit 1
+              fi
+              
+            elif [ ! -f "tfplan" ]; then
+              echo "🆕 No plan file found - generating fresh plan from current state"
+              terraform plan -out=tfplan-fresh \
+                -var="aws_region=${{ env.AWS_REGION }}" \
+                -var="aws_profile="
+              
+              echo "Applying fresh plan..."
+              if terraform apply -auto-approve tfplan-fresh; then
+                echo "✅ Infrastructure deployed successfully with fresh plan"
+              else
+                echo "❌ Fresh plan apply failed"
+                exit 1
+              fi
               
             elif grep -q "ResourceNotFoundException.*DataSource.*is not found" "$APPLY_OUTPUT_FILE"; then
               echo "Detected orphaned Bedrock data source - applying fix..."
