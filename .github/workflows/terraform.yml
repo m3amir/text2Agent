@@ -553,10 +553,9 @@ jobs:
             echo "❌ ERROR: No resources found in Terraform state!"
             exit 1
           else
+            echo "✅ Found $( echo "$RESOURCES" | wc -l ) resources to destroy:"
             echo "$RESOURCES"
           fi
-          
-          terraform plan -destroy -var="aws_region=${{ env.AWS_REGION }}" -var="aws_profile=" | head -50
 
       - name: Terraform Destroy
         run: |
