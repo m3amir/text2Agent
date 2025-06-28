@@ -259,6 +259,20 @@ jobs:
           chmod +x ./setup_terraform_backend.sh
           ./setup_terraform_backend.sh
 
+      - name: Check for Stale Locks
+        run: |
+          echo "🔍 Checking for stale Terraform locks before apply..."
+          chmod +x ./cleanup_stale_locks.sh
+          
+          # Run the stale lock detection script
+          if ./cleanup_stale_locks.sh; then
+            echo "✅ No stale locks detected"
+          else
+            echo "⚠️ Stale locks detected - check output above"
+            echo "If workflows were recently cancelled, you may need to force-unlock"
+            echo "This is expected after cancelled workflows and is safe to proceed"
+          fi
+
       - name: Terraform Init
         run: |
           terraform init
