@@ -56,7 +56,7 @@ class PipelineBuilder:
             
             if self.user_credentials:
                 print(f"✅ Successfully loaded credentials")
-                print(f"🔑 Secret name: {self.user_secret_name}")
+                print(f"Secret name: {self.user_secret_name}")
                 self._print_credential_summary(self.user_credentials)
             else:
                 print(f"❌ Failed to load credentials for {self.user_email}")
@@ -67,7 +67,7 @@ class PipelineBuilder:
     
     def _print_credential_summary(self, data):
         """Print a safe summary of credential structure"""
-        print("\n📋 CREDENTIAL SUMMARY:")
+        print("\nCREDENTIAL SUMMARY:")
         print("=" * 30)
         
         if isinstance(data, dict):
@@ -157,18 +157,18 @@ class PipelineBuilder:
                 if 'questions' in interrupt_data.value:
                     questions = interrupt_data.value['questions']
                     
-                    print("\n📋 FEEDBACK QUESTIONS:")
+                    print("\nFEEDBACK QUESTIONS:")
                     print("=" * 40)
                     
                     answers = {}
                     for i, question in enumerate(questions, 1):
-                        print(f"\n🔸 Question {i}: {question}")
+                        print(f"\nQuestion {i}: {question}")
                         while True:
                             answer = input("Your answer: ").strip()
                             if answer:
                                 answers[question] = answer
                                 break
-                            print("⚠️  Please provide a non-empty answer.")
+                            print("Please provide a non-empty answer.")
                     
                     print("\n✅ Processing your responses...")
                     
@@ -233,11 +233,11 @@ def build_agent_pipeline_sync(agent_description: str, user_email: str = "") -> D
 
 if __name__ == "__main__":
     async def main():
-        print("🚀 Starting Pipeline Builder")
+        print("Starting Pipeline Builder")
         print("=" * 40)
         
         # Build first pipeline
-        print("\n📦 Building Pipeline 1...")
+        print("\nBuilding Pipeline 1...")
         result1 = await build_agent_pipeline(
             "Send emails to amir in our leads excel spreadsheet you will find his email", 
             'amir@m3labs.co.uk'
@@ -245,11 +245,11 @@ if __name__ == "__main__":
         
         print(f"✅ Pipeline 1: {'Success' if result1['success'] else 'Failed'}")
         if result1['success']:
-            print(f"📦 Connectors: {result1['connectors']}")
-            print(f"🔧 Tools: {len(result1['tools'])} connectors")
+            print(f"Connectors: {result1['connectors']}")
+            print(f"Tools: {len(result1['tools'])} connectors")
         
         # Build second pipeline
-        print("\n📦 Building Pipeline 2...")
+        print("\nBuilding Pipeline 2...")
         result2 = await build_agent_pipeline(
             "Generate charts and create PDF reports with analysis", 
             'amir@m3labs.co.uk'
@@ -257,7 +257,7 @@ if __name__ == "__main__":
         
         print(f"✅ Pipeline 2: {'Success' if result2['success'] else 'Failed'}")
         if result2['success']:
-            print(f"📦 Connectors: {result2['connectors']}")
-            print(f"🔧 Tools: {len(result2['tools'])} connectors")
+            print(f"Connectors: {result2['connectors']}")
+            print(f"Tools: {len(result2['tools'])} connectors")
     
     asyncio.run(main())

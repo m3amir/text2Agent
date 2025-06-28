@@ -347,3 +347,22 @@ if __name__ == "__main__":
     else:
         print("No interrupt occurred for chart task - process completed without feedback questions.")
         print(chart_result.get('final_result', {}))
+
+        
+        
+
+
+
+# collector accepts description
+# it then asks the user questions for feedback like where is the excel spreadsheet stored?, How often do you want to trigger this? etc
+# The user must use the chat interface to answer the questions
+# The collector then uses the feedback to build the agent
+# The collector will return a list of connectors and tools for example sharepoint, google sheets, slack
+
+# These icons should be displayed on a preliminary canvas in a section called components 
+# then there should be a button or confirmation to tell it to continue and build the workflow
+
+
+# Now websockets should be used to update in real time the canvas with the components and tools for example
+# The architect will now output a formatted JSON with components resembling the following:
+
