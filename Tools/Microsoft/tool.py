@@ -20,17 +20,19 @@ except ImportError:
 
 class MicrosoftToolkit:
     def __init__(self, credentials: Dict[str, str]):
-        self.tenant_id = credentials.get('tenant_id')
-        self.client_id = credentials.get('client_id') 
-        self.client_secret = credentials.get('client_secret')
-        self.site_url = credentials.get('site_url')
-        self.email = credentials.get('email')
+        # Handle both prefixed (MICROSOFT_*) and non-prefixed keys
+        self.tenant_id = credentials.get('tenant_id') or credentials.get('MICROSOFT_TENANT_ID')
+        self.client_id = credentials.get('client_id') or credentials.get('MICROSOFT_CLIENT_ID')
+        self.client_secret = credentials.get('client_secret') or credentials.get('MICROSOFT_CLIENT_SECRET')
+        self.site_url = credentials.get('site_url') or credentials.get('MICROSOFT_SITE_URL')
+        self.email = credentials.get('email') or credentials.get('MICROSOFT_EMAIL')
         self.access_token = None
         self.site_id = None
         self.drives = {}
         
         if not all([self.tenant_id, self.client_id, self.client_secret]):
-            raise ValueError("Missing required credentials: tenant_id, client_id, client_secret")
+            available_keys = list(credentials.keys())
+            raise ValueError(f"Missing required credentials: tenant_id, client_id, client_secret. Available keys: {available_keys}")
     
     def _run_async_safe(self, coro):
         """Safely run async code whether or not we're already in an async context."""
@@ -413,30 +415,30 @@ class MicrosoftToolkit:
         except:
             return []
     
-    def microsoft_sharepoint_search_files(self, query: str, drive_name: str = "Documents", file_type: str = None) -> str:
+    def microsoft_sharepoint_search_files(self, query: str, file_type: str = None) -> str:
         """
         Search for files in Microsoft SharePoint document libraries using keyword queries.
         
         This tool searches through SharePoint sites and document libraries to find files matching
-        your search criteria. It can filter by file type and search within specific drives/libraries.
+        your search criteria. It can filter by file type and searches within the "Documents" drive/library.
         Returns detailed file information including download URLs and metadata.
         
         Args:
             query (str): Search keywords or terms to find in file names and content
-            drive_name (str, optional): Name of the SharePoint drive/library to search. Defaults to "Documents"
             file_type (str, optional): File extension to filter results (e.g., "pdf", "docx", "xlsx")
             
         Returns:
             str: JSON string with matching files including name, path, size, creation date, 
                  modification date, download URL, web URL, and MIME type
         """
-        return self._run_async_safe(self._search_files_async(query, drive_name, file_type))
+        return self._run_async_safe(self._search_files_async(query, file_type))
     
-    async def _search_files_async(self, query: str, drive_name: str = "Documents", file_type: str = None) -> str:
+    async def _search_files_async(self, query: str, file_type: str = None) -> str:
         try:
             if not self.drives:
                 await self._get_drives()
             
+            drive_name = "Documents"
             drive_id = self.drives.get(drive_name)
             if not drive_id:
                 return json.dumps({"error": f"Drive '{drive_name}' not found", "available_drives": list(self.drives.keys())})
@@ -472,29 +474,51 @@ class MicrosoftToolkit:
         except Exception as e:
             return json.dumps({'error': f"Exception: {str(e)}"})
     
-    def microsoft_sharepoint_download_and_extract_text(self, file_id: str, drive_name: str = "Documents") -> str:
+    def microsoft_sharepoint_download_and_extract_text(self, file_id: str, run_id: str = None) -> str:
         """
         Download a file from SharePoint and extract its text content for analysis.
         
         This tool downloads files from SharePoint and extracts readable text from various formats
         including Word documents (.docx), PDFs (.pdf), Excel spreadsheets (.xlsx), and plain text files (.txt). 
         Perfect for content analysis, document processing, and information extraction workflows.
+        Files are saved to tmp/runs/{user_email}/{run_id}/ for later access.
         
         Args:
             file_id (str): Unique identifier of the file to download (obtained from search_files)
-            drive_name (str, optional): Name of the SharePoint drive/library containing the file. 
-                                      Defaults to "Documents"
+            run_id (str, optional): Unique run identifier for organizing downloads
             
         Returns:
             str: JSON string with extracted text content, file metadata, extraction method used,
-                 and a preview of the content. Supports .docx, .pdf, .xlsx, and .txt files
+             saved file path, and a preview of the content. Supports .docx, .pdf, .xlsx, and .txt files
         """
-        return self._run_async_safe(self._download_and_extract_text_async(file_id, drive_name))
+        drive_name = "Documents"
+        if not run_id:
+            import uuid
+            from datetime import datetime
+            run_id = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:8]}"
+        return self._run_async_safe(self._download_and_extract_text_async(file_id, drive_name, run_id))
     
-    async def _download_and_extract_text_async(self, file_id: str, drive_name: str = "Documents") -> str:
+    async def _download_and_extract_text_async(self, file_id: str, drive_name: str = "Documents", run_id: str = None) -> str:
         try:
             if not EXTRACTION_AVAILABLE:
                 return json.dumps({'error': 'Text extraction libraries not available', 'success': False})
+            
+            # Create directory structure for saving files
+            import os
+            from pathlib import Path
+            import uuid
+            from datetime import datetime
+            
+            user_email = self.email or "unknown_user"
+            
+            # Generate a proper UUID-based run_id if not provided or if it's too simple
+            if not run_id or run_id in ['test_run_1', 'test_run', 'run_1']:
+                run_id = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:8]}"
+            
+            # Create directory structure: tmp/runs/{user_email}/{run_id}/
+            # Keep actual @ symbol in email for proper directory naming
+            download_dir = Path("tmp") / "runs" / user_email / run_id
+            download_dir.mkdir(parents=True, exist_ok=True)
             
             # Get file metadata
             if not self.drives:
@@ -589,6 +613,13 @@ class MicrosoftToolkit:
                     'download_url_exists': bool(download_url)
                 })
             
+            # Save the file to disk
+            original_file_name = file_data.get('name', f'file_{file_id}')
+            file_path = download_dir / original_file_name
+            
+            with open(file_path, 'wb') as f:
+                f.write(response.content)
+            
             # Extract text based on file type
             file_name = file_data.get('name', '').lower()
             mime_type = file_data.get('file', {}).get('mimeType', '')
@@ -645,7 +676,8 @@ class MicrosoftToolkit:
                     'success': True,
                     'file_info': {'name': file_data.get('name'), 'size': file_data.get('size'), 'id': file_id},
                     'extraction': {'method': extraction_method, 'text_length': len(extracted_text), 'text': extracted_text},
-                    'preview': extracted_text[:500] + "..." if len(extracted_text) > 500 else extracted_text
+                    'preview': extracted_text[:500] + "..." if len(extracted_text) > 500 else extracted_text,
+                    'saved_file_path': str(file_path)
                 })
                 
             except Exception as extraction_error:

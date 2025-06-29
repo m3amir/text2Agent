@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Universal Tool MCP Server - Stdio"""
 
-import os, sys, json, asyncio, importlib.util, inspect
+import os, sys, json, asyncio, importlib.util, inspect, logging
 from typing import Dict, Any
 
 # Load environment variables from .env file
@@ -12,6 +12,28 @@ except ImportError:
     # dotenv not available, skip loading
     pass
 
+# Configure logging
+def setup_mcp_logging():
+    """Setup logging for MCP server with file-based logging and optional console output"""
+    log_level = os.environ.get('MCP_LOG_LEVEL', 'INFO').upper()
+    enable_console = os.environ.get('MCP_CONSOLE_LOG', 'false').lower() == 'true'
+    
+    handlers = [logging.FileHandler('mcp_server.log')]
+    
+    # Only add console handler if explicitly enabled via environment variable
+    if enable_console:
+        handlers.append(logging.StreamHandler())
+    
+    logging.basicConfig(
+        level=getattr(logging, log_level, logging.INFO),
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=handlers
+    )
+    
+    return logging.getLogger(__name__)
+
+logger = setup_mcp_logging()
+
 try:
     from mcp.server import Server
     from mcp.server.stdio import stdio_server
@@ -19,7 +41,7 @@ try:
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
 except ImportError:
-    print("MCP library required: pip install mcp")
+    logger.error("MCP library required: pip install mcp")
     sys.exit(1)
 
 class UniversalToolServer:
@@ -52,7 +74,7 @@ class UniversalToolServer:
         """Initialize server with local and remote tools"""
         await self._load_local_tools()
         await self._load_remote_tools()
-        print(f"Server ready with {len(self.tools)} tools", file=sys.stderr)
+        logger.info(f"Server ready with {len(self.tools)} tools")
     
     async def _load_local_tools(self):
         """Load tools from Tools directory"""
@@ -141,22 +163,22 @@ class UniversalToolServer:
                         self.handlers[method_name] = self._make_handler(tool_class, method_name)
                         methods_found += 1
                 
-                print(f"📁 {tool_name} ({methods_found} methods)", file=sys.stderr)
+                logger.info(f"📁 {tool_name} ({methods_found} methods)")
                 
             except Exception as e:
-                print(f"❌ {tool_name}: {e}", file=sys.stderr)
+                logger.error(f"❌ {tool_name}: {e}")
     
     def _make_handler(self, tool_class, method_name):
         """Create handler for tool method"""
         async def handler(arguments: Dict[str, Any]):
             try:
-                print(f"Instantiating {tool_class.__name__} for {method_name}", file=sys.stderr, flush=True)
-                print(f"Arguments received: {arguments}", file=sys.stderr, flush=True)
+                logger.debug(f"Instantiating {tool_class.__name__} for {method_name}")
+                logger.debug(f"Arguments received: {arguments}")
                 
                 # Extract secret_name from arguments if present (for AWS Secrets Manager)
                 secret_name = arguments.pop('secret_name', None)
                 if secret_name:
-                    print(f"Secret name provided: {secret_name}", file=sys.stderr, flush=True)
+                    logger.debug(f"Secret name provided: {secret_name}")
                 
                 credentials = self._get_credentials(tool_class.__name__, secret_name)
                 
@@ -165,7 +187,7 @@ class UniversalToolServer:
                     from datetime import datetime
                     import uuid
                     self.shared_agent_run_id = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:8]}"
-                    print(f"Using shared agent run ID: {self.shared_agent_run_id}", file=sys.stderr, flush=True)
+                    logger.info(f"Using shared agent run ID: {self.shared_agent_run_id}")
                 
                 # Initialize tool with shared agent run ID (only if constructor accepts it)
                 try:
@@ -173,7 +195,7 @@ class UniversalToolServer:
                     accepts_agent_run_id = 'agent_run_id' in sig.parameters
                     
                     if credentials:
-                        print(f"Credentials being passed to {tool_class.__name__}: {credentials}", file=sys.stderr, flush=True)
+                        logger.debug(f"Credentials being passed to {tool_class.__name__}: {credentials}")
                         if accepts_agent_run_id:
                             instance = tool_class(credentials, agent_run_id=self.shared_agent_run_id)
                         else:
@@ -189,11 +211,11 @@ class UniversalToolServer:
                         instance = tool_class(credentials)
                     else:
                         instance = tool_class()
-                print(f"✅ {tool_class.__name__} instantiated, calling {method_name}", file=sys.stderr, flush=True)
+                logger.debug(f"✅ {tool_class.__name__} instantiated, calling {method_name}")
                 
                 # Debug the instance email value
                 if hasattr(instance, 'email'):
-                    print(f"Instance email value: {instance.email}", file=sys.stderr, flush=True)
+                    logger.debug(f"Instance email value: {instance.email}")
                 
                 result = getattr(instance, method_name)(**arguments)
                 
@@ -205,16 +227,16 @@ class UniversalToolServer:
                     import os
                     if os.path.exists(instance.charts_folder):
                         chart_files = os.listdir(instance.charts_folder)
-                        print(f"Charts folder contains: {chart_files}", file=sys.stderr, flush=True)
+                        logger.debug(f"Charts folder contains: {chart_files}")
                     else:
-                        print(f"Charts folder does not exist: {instance.charts_folder}", file=sys.stderr, flush=True)
+                        logger.debug(f"Charts folder does not exist: {instance.charts_folder}")
                 
-                print(f"✅ Tool result: {result}", file=sys.stderr, flush=True)
+                logger.debug(f"✅ Tool result: {result}")
                 return [TextContent(type="text", text=str(result))]
             except Exception as e:
-                print(f"❌ Tool execution error: {str(e)}", file=sys.stderr, flush=True)
+                logger.error(f"❌ Tool execution error: {str(e)}")
                 import traceback
-                traceback.print_exc(file=sys.stderr)
+                logger.error(traceback.format_exc())
                 return [TextContent(type="text", text=f"Error: {str(e)}")]
         return handler
     
@@ -250,25 +272,25 @@ class UniversalToolServer:
             from utils.core import get_secret
             
             # Use the provided secret name
-            print(f"Retrieving credentials from Secrets Manager: {secret_name}", file=sys.stderr, flush=True)
+            logger.info(f"Retrieving credentials from Secrets Manager: {secret_name}")
             
             # Get secret from AWS Secrets Manager
             secret_data = get_secret(secret_name)
             
-            print(f"✅ Successfully retrieved credentials", file=sys.stderr, flush=True)
+            logger.info(f"✅ Successfully retrieved credentials")
             
             # Extract connector name dynamically from class name
             connector_name = self._extract_connector_name(class_name)
             
             if connector_name:
-                print(f"Detected connector: {connector_name} from class: {class_name}", file=sys.stderr, flush=True)
+                logger.debug(f"Detected connector: {connector_name} from class: {class_name}")
                 return self._get_connector_credentials(secret_data, connector_name)
             else:
-                print(f"Could not detect connector from class name: {class_name}", file=sys.stderr, flush=True)
+                logger.warning(f"Could not detect connector from class name: {class_name}")
                 return None
             
         except Exception as e:
-            print(f"❌ Failed to retrieve credentials from Secrets Manager: {e}", file=sys.stderr, flush=True)
+            logger.error(f"❌ Failed to retrieve credentials from Secrets Manager: {e}")
             return None
     
     def _extract_connector_name(self, class_name):
@@ -307,17 +329,17 @@ class UniversalToolServer:
                     clean_key = key.replace(prefix, '').lower()  # SLACK_TOKEN → token
                     connector_creds[clean_key] = value
             
-            print(f"Found {len(matching_keys)} {connector_name} credentials with prefix {prefix}", file=sys.stderr, flush=True)
-            print(f"Credential keys: {list(connector_creds.keys())}", file=sys.stderr, flush=True)
+            logger.debug(f"Found {len(matching_keys)} {connector_name} credentials with prefix {prefix}")
+            logger.debug(f"Credential keys: {list(connector_creds.keys())}")
             return connector_creds
         
         # Check for nested structure
         connector_lower = connector_name.lower()
         if connector_lower in secret_data:
-            print(f"✅ Found {connector_name} credentials in nested format", file=sys.stderr, flush=True)
+            logger.debug(f"✅ Found {connector_name} credentials in nested format")
             return secret_data[connector_lower]
         
-        print(f"No {connector_name} credentials found (tried prefix '{prefix}' and nested '{connector_lower}')", file=sys.stderr, flush=True)
+        logger.warning(f"No {connector_name} credentials found (tried prefix '{prefix}' and nested '{connector_lower}')")
         return None
     
     async def _load_remote_tools(self):
@@ -352,7 +374,7 @@ class UniversalToolServer:
                     ))
                     self.handlers[tool_name] = lambda args, cfg=config, orig=tool.name: self._call_remote(cfg, orig, args)
                 
-                print(f"{server_name} ({len(tools_result.tools)} tools)", file=sys.stderr)
+                logger.info(f"{server_name} ({len(tools_result.tools)} tools)")
     
     async def _call_remote(self, config, original_name, arguments):
         """Call remote tool"""

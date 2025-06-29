@@ -38,7 +38,7 @@ DB_NAME = 'text2AgentTenants'
 _aws_session = None
 _db_credentials = None
 
-def setup_logging(user_email: str, component_name: str, log_manager=None):
+def setup_logging(user_email: str, component_name: str, log_manager=None, enable_console=True):
     """
     Centralized logging setup for all components
     
@@ -46,6 +46,7 @@ def setup_logging(user_email: str, component_name: str, log_manager=None):
         user_email (str): User's email address
         component_name (str): Name of the component (e.g., 'AI_Colleagues', 'STR')
         log_manager: Optional LogManager instance for organized directory structure
+        enable_console (bool): Whether to enable console logging (default: True)
     
     Returns:
         logging.Logger: Configured logger instance
@@ -78,11 +79,12 @@ def setup_logging(user_email: str, component_name: str, log_manager=None):
         file_handler.setFormatter(file_formatter)
         logger.addHandler(file_handler)
         
-        # Console handler
-        console_handler = logging.StreamHandler()
-        console_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        console_handler.setFormatter(console_formatter)
-        logger.addHandler(console_handler)
+        # Console handler (optional)
+        if enable_console:
+            console_handler = logging.StreamHandler()
+            console_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            console_handler.setFormatter(console_formatter)
+            logger.addHandler(console_handler)
     
     # Prevent propagation to avoid duplicate messages from root logger
     logger.propagate = False
