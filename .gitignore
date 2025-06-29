@@ -76,3 +76,5 @@ backend-override.tf
 terraform.rc 
 terraform/.terraform.lock.hcl
 *.backup
+
+*.zip
