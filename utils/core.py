@@ -23,10 +23,16 @@ logger = logging.getLogger(__name__)
 # AWS Configuration
 AWS_PROFILE = 'm3'
 AWS_REGION = 'eu-west-2'
-SECRET_NAME = 'rds!cluster-e7dab0b5-4fb4-45fd-b4d3-d27929b53458'
-DB_HOST = 'text2agenttenant-instance-1.cluqugi4urqi.eu-west-2.rds.amazonaws.com'
+SECRET_NAME = 'text2agent-dev-db-credentials-v2'
+DB_HOST = 'text2agent-dev-cluster.cluster-cluqugi4urqi.eu-west-2.rds.amazonaws.com'
 DB_PORT = 5432
-DB_NAME = 'postgres'
+DB_NAME = 'text2AgentTenants'
+
+# NOTE: The Aurora cluster is deployed in a private VPC and only accessible from:
+# 1. Lambda functions (within VPC)
+# 2. EC2 instances in the same VPC
+# 3. Local development with VPN/bastion host access
+# For local testing without VPC access, use AWS RDS Data API instead
 
 # Global session and credentials cache
 _aws_session = None
@@ -165,6 +171,7 @@ def get_aws_session():
 def get_secret(secret_name: str, region: str = AWS_REGION) -> Dict[str, Any]:
     """Get secret from AWS Secrets Manager"""
     try:
+        print(f"Getting secret {secret_name} from AWS Secrets Manager")
         session = get_aws_session()
         client = session.client('secretsmanager')
         response = client.get_secret_value(SecretId=secret_name)
@@ -185,13 +192,76 @@ def get_db_credentials() -> Dict[str, str]:
                 'password': secret_data.get('password'),
                 'host': secret_data.get('host', DB_HOST),
                 'port': secret_data.get('port', DB_PORT),
-                'dbname': secret_data.get('dbname', DB_NAME)
+                'dbname': secret_data.get('dbname', DB_NAME),
+                'cluster_arn': f"arn:aws:rds:{AWS_REGION}:994626600571:cluster:text2agent-dev-cluster",
+                'secret_arn': f"arn:aws:secretsmanager:{AWS_REGION}:994626600571:secret:{SECRET_NAME}"
             }
             logger.info(f"✅ Successfully retrieved credentials for user: {_db_credentials['username']}")
         except Exception as e:
             logger.error(f"❌ Failed to retrieve credentials: {e}")
             raise
     return _db_credentials
+
+def execute_rds_data_api(sql: str, database: str = 'text2AgentTenants') -> list:
+    """
+    Execute SQL using AWS RDS Data API (works without VPC access)
+    
+    Args:
+        sql (str): SQL query to execute
+        database (str): Database name (defaults to text2AgentTenants)
+        
+    Returns:
+        list: Query results
+    """
+    try:
+        session = get_aws_session()
+        rds_data = session.client('rds-data')
+        creds = get_db_credentials()
+        
+        response = rds_data.execute_statement(
+            resourceArn=creds['cluster_arn'],
+            secretArn=creds['secret_arn'],
+            database=database,
+            sql=sql,
+            includeResultMetadata=True
+        )
+        
+        # Convert RDS Data API response to standard format
+        results = []
+        if 'records' in response:
+            column_metadata = response.get('columnMetadata', [])
+            for record in response['records']:
+                row = {}
+                for i, field in enumerate(record):
+                    # Get column name from metadata or use default
+                    if i < len(column_metadata):
+                        column_name = column_metadata[i].get('name', f'col_{i}')
+                    else:
+                        column_name = f'col_{i}'
+                    
+                    # Extract value based on type
+                    if 'stringValue' in field:
+                        row[column_name] = field['stringValue']
+                    elif 'longValue' in field:
+                        row[column_name] = field['longValue']
+                    elif 'doubleValue' in field:
+                        row[column_name] = field['doubleValue']
+                    elif 'booleanValue' in field:
+                        row[column_name] = field['booleanValue']
+                    elif 'isNull' in field and field['isNull']:
+                        row[column_name] = None
+                    else:
+                        # Handle any other case
+                        row[column_name] = str(field)
+                results.append(row)
+        
+        logger.info(f"✅ RDS Data API query executed, returned {len(results)} rows")
+        print(f"🔍 RDS Data API results: {results}")  # Debug print
+        return results
+        
+    except Exception as e:
+        logger.error(f"❌ RDS Data API query failed: {e}")
+        raise
 
 @contextmanager
 def get_db_cursor():
@@ -244,18 +314,33 @@ def execute_query(query: str, params: Optional[tuple] = None) -> list:
 def get_tenant_mapping_by_email(email: str) -> Optional[Dict[str, Any]]:
     """Get tenant mapping by email address"""
     try:
+        # Try direct connection first
         query = """
-        SELECT tenant, domain 
-        FROM "Tenants".tenantmappings 
-        WHERE email = %s
+        SELECT t.tenant_id as tenant, t.domain 
+        FROM tenantmappings t
+        JOIN users u ON t.tenant_id = u.tenant_id
+        WHERE u.email = %s
         """
-        results = execute_query(query, (email,))
+        try:
+            results = execute_query(query, (email,))
+        except Exception as conn_error:
+            logger.warning(f"⚠️ Direct DB connection failed, trying RDS Data API: {conn_error}")
+            # Fallback to RDS Data API
+            sql = f"""
+            SELECT t.tenant_id as tenant, t.domain 
+            FROM tenantmappings t
+            JOIN users u ON t.tenant_id = u.tenant_id
+            WHERE u.email = '{email}'
+            """
+            results = execute_rds_data_api(sql)
         
         if results:
             tenant_data = dict(results[0])
+            print(f"🔍 Retrieved tenant data: {tenant_data}")  # Debug print
             logger.info(f"✅ Found tenant mapping for email: {email}")
             return tenant_data
         else:
+            print(f"🔍 No rows returned for email: {email}")  # Debug print
             logger.warning(f"⚠️ No tenant mapping found for email: {email}")
             return None
             
@@ -264,17 +349,62 @@ def get_tenant_mapping_by_email(email: str) -> Optional[Dict[str, Any]]:
         raise
 
 def get_tenant_domain_by_email(email: str) -> Optional[str]:
-    """Construct tenant domain string from email"""
+    """Get actual bucket name from database for email (handles bucket recreation)"""
     try:
+        # First try to get the actual bucket name from database
+        bucket_name = get_actual_bucket_name_by_email(email)
+        if bucket_name:
+            logger.info(f"✅ Found actual bucket name for {email}: {bucket_name}")
+            return bucket_name
+            
+        # Fallback: construct from tenant mapping if no bucket name found
         tenant_mapping = get_tenant_mapping_by_email(email)
         if tenant_mapping:
             domain_string = f"tenant-{tenant_mapping['tenant']}-{tenant_mapping['domain']}"
-            logger.info(f"✅ Constructed tenant domain for {email}: {domain_string}")
+            logger.info(f"✅ Fallback constructed tenant domain for {email}: {domain_string}")
             return domain_string
         return None
     except Exception as e:
-        logger.error(f"❌ Failed to construct tenant domain for {email}: {e}")
+        logger.error(f"❌ Failed to get tenant domain for {email}: {e}")
         raise
+
+def get_actual_bucket_name_by_email(email: str) -> Optional[str]:
+    """Get the actual bucket name from tenantmappings table by email"""
+    try:
+        # Try direct connection first
+        query = """
+        SELECT t.bucket_name 
+        FROM tenantmappings t
+        JOIN users u ON t.tenant_id = u.tenant_id
+        WHERE u.email = %s
+        """
+        try:
+            results = execute_query(query, (email,))
+        except Exception as conn_error:
+            logger.warning(f"⚠️ Direct DB connection failed, trying RDS Data API: {conn_error}")
+            # Fallback to RDS Data API
+            sql = f"""
+            SELECT t.bucket_name 
+            FROM tenantmappings t
+            JOIN users u ON t.tenant_id = u.tenant_id
+            WHERE u.email = '{email}'
+            """
+            results = execute_rds_data_api(sql)
+        
+        if results:
+            bucket_name = results[0].get('bucket_name')
+            if bucket_name:
+                print(f"🔍 Retrieved actual bucket name from DB: {bucket_name}")
+                logger.info(f"✅ Found actual bucket name for email: {email}")
+                return bucket_name
+        
+        print(f"🔍 No bucket name found in database for email: {email}")
+        logger.warning(f"⚠️ No bucket name found in database for email: {email}")
+        return None
+            
+    except Exception as e:
+        logger.error(f"❌ Failed to get actual bucket name for {email}: {e}")
+        return None
 
 def load_config(config_file: str = "./Config/config.yml") -> Dict[str, Any]:
     """Load configuration from YAML file"""
@@ -325,16 +455,16 @@ def get_user_uid_by_email(email: str) -> Optional[str]:
     """Get user uid from users table by email address"""
     try:
         query = """
-        SELECT uid 
-        FROM "Tenants".users 
+        SELECT user_id 
+        FROM users 
         WHERE email = %s
         """
         results = execute_query(query, (email,))
         
         if results:
-            uid = results[0]['uid']
-            logger.info(f"✅ Found uid for email: {email}")
-            return uid
+            user_id = results[0]['user_id']
+            logger.info(f"✅ Found user_id for email: {email}")
+            return user_id
         else:
             logger.warning(f"⚠️ No user found with email: {email}")
             return None

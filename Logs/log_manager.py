@@ -12,7 +12,7 @@ from utils.core import get_tenant_domain_by_email
 class LogManager:
     """Manages logging and syncing to tenant-specific S3 buckets"""
     
-    def __init__(self, email: str, profile_name: str = 'm3', region_name: str = 'us-east-1'):
+    def __init__(self, email: str, profile_name: str = 'm3', region_name: str = 'eu-west-2'):
         self.email = email
         self.profile_name = profile_name
         self.region_name = region_name
@@ -44,14 +44,26 @@ class LogManager:
     
     def _get_tenant_bucket_name(self) -> str:
         """Get the tenant-specific bucket name based on email"""
+        print(f"🔍 Getting bucket name for email: {self.email}")
         try:
+            print("🔍 Attempting database lookup...")
             tenant_domain = get_tenant_domain_by_email(self.email)
             if tenant_domain:
+                print(f"✅ Found tenant domain from DB: {tenant_domain}")
                 return tenant_domain
             else:
-                return 'ai-colleagues-logs-default'
+                # Fallback: create bucket name from email domain
+                domain = self.email.split('@')[1].replace('.', '-')
+                fallback_name = f"tenant-logs-{domain}"
+                print(f"⚠️ No tenant domain found, using fallback: {fallback_name}")
+                return fallback_name
         except Exception as e:
-            return 'ai-colleagues-logs-default'
+            # Database connectivity failed, use email domain as fallback
+            print(f"❌ Database lookup failed, using fallback bucket name: {e}")
+            domain = self.email.split('@')[1].replace('.', '-')
+            fallback_name = f"tenant-logs-{domain}"
+            print(f"🔍 Fallback bucket name: {fallback_name}")
+            return fallback_name
     
     def _setup_manager_logging(self) -> logging.Logger:
         """Set up logging for the LogManager itself"""
@@ -78,14 +90,20 @@ class LogManager:
         """Ensure the tenant-specific S3 bucket exists, create if it doesn't"""
         try:
             bucket_name = self.tenant_bucket
+            print(f"🔍 Checking if bucket exists: {bucket_name}")
+            print(f"🔍 Using AWS region: {self.region_name}")
             
             try:
+                print(f"🔍 Calling head_bucket for: {bucket_name}")
                 self.s3_client.head_bucket(Bucket=bucket_name)
+                print(f"✅ Bucket {bucket_name} exists and is accessible")
                 self.logger.info(f"✅ Bucket {bucket_name} exists")
                 return True
-            except self.s3_client.exceptions.NoSuchBucket:
+            except self.s3_client.exceptions.NoSuchBucket as nsb_error:
+                print(f"❌ Bucket {bucket_name} does not exist: {nsb_error}")
                 try:
-                    self.logger.info(f"🔧 Creating tenant bucket {bucket_name}...")
+                    print(f"🔧 Attempting to create bucket {bucket_name} in region {self.region_name}...")
+                    self.logger.info(f"🔧 Creating tenant bucket {bucket_name} in region {self.region_name}...")
                     if self.region_name == 'us-east-1':
                         self.s3_client.create_bucket(Bucket=bucket_name)
                     else:
@@ -93,13 +111,24 @@ class LogManager:
                             Bucket=bucket_name,
                             CreateBucketConfiguration={'LocationConstraint': self.region_name}
                         )
+                    print(f"✅ Successfully created bucket {bucket_name}")
                     self.logger.info(f"✅ Created tenant bucket {bucket_name}")
                     return True
                 except Exception as create_error:
-                    self.logger.warning(f"⚠️  Cannot create bucket {bucket_name} (likely permissions): {create_error}")
+                    error_msg = str(create_error)
+                    if "BucketAlreadyExists" in error_msg:
+                        self.logger.warning(f"⚠️ Bucket {bucket_name} already exists (owned by another account)")
+                    elif "BucketAlreadyOwnedByYou" in error_msg:
+                        self.logger.info(f"✅ Bucket {bucket_name} already exists and is owned by you")
+                        return True
+                    elif "AccessDenied" in error_msg:
+                        self.logger.warning(f"⚠️ Access denied creating bucket {bucket_name} (IAM permissions needed)")
+                    else:
+                        self.logger.warning(f"⚠️ Cannot create bucket {bucket_name}: {create_error}")
                     self.logger.info(f"📝 Continuing with local logging only")
                     return False
             except Exception as e:
+                print(f"❌ Unexpected error checking bucket {bucket_name}: {type(e).__name__}: {e}")
                 self.logger.warning(f"⚠️  Error checking bucket {bucket_name}: {e}")
                 self.logger.info(f"📝 Continuing with local logging only")
                 return False
@@ -231,10 +260,13 @@ class LogManager:
     
     def force_upload_current_log(self, log_filename: str) -> bool:
         """Force upload a specific log file to S3, bypassing safety buffer"""
+        print(f"🔍 Force uploading log file: {log_filename}")
         try:
             log_file = self.logs_dir / log_filename
+            print(f"🔍 Looking for log file at: {log_file}")
             
             if not log_file.exists():
+                print(f"❌ Log file not found: {log_filename}")
                 self.logger.warning(f"⚠️  Log file not found: {log_filename}")
                 return False
                 
@@ -244,7 +276,9 @@ class LogManager:
                 return False
             
             # Ensure bucket exists
+            print(f"🔍 Checking if bucket exists before upload...")
             if not self.ensure_bucket_exists():
+                print(f"❌ Bucket check failed - S3 upload unavailable")
                 self.logger.info("📝 S3 upload unavailable - continuing with local logging only")
                 return False
             
@@ -260,6 +294,7 @@ class LogManager:
                 return False
                 
         except Exception as e:
+            print(f"❌ Exception in force_upload_current_log: {type(e).__name__}: {e}")
             self.logger.error(f"❌ Error force uploading {log_filename}: {e}")
             return False
         
